@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+authors = ["Chris Dickinson <chris@neversaw.us>"]
+license = "MIT"
+homepage = "https://www.neversaw.us/"
+repository = "https://github.com/chrisdickinson/blender-extism-wasm"
+version = "0.0.0+replaced-by-ci"

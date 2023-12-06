@@ -84,11 +84,11 @@ def unpack_property_metadata(property_descriptor):
             return {"enum": output}
 
         case bpy.types.CollectionProperty:
-            output["type"] = property_descriptor.fixed_type.identifier
+            output["fixed_type"] = property_descriptor.fixed_type.identifier
             return {"collection": output}
 
         case bpy.types.PointerProperty:
-            output["type"] = property_descriptor.fixed_type.identifier
+            output["fixed_type"] = property_descriptor.fixed_type.identifier
             return {"pointer": output}
 
         case bpy.types.FloatProperty:

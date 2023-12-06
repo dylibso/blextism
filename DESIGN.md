@@ -8,3 +8,6 @@ Refer to Blender objects and APIs within a Wasm guest module!
     ptr -> (type, <object?>)
 - Methods are registered once
 
+---
+
+why don't we see `.new` and `.remove` on BlendDataObjects?
