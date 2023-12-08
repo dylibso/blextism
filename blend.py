@@ -53,8 +53,9 @@ for attr in dir(bpy.types):
             cursor = next
 
 # pprint(root[object][bpy.types.bpy_struct][bpy.types.Property])
+POINTERS = []
 
-def unpack_property_metadata(property_descriptor):
+def unpack_property_metadata(property_descriptor, clsname):
     output = {
         "identifier": property_descriptor.identifier,
         "description": property_descriptor.description,
@@ -73,7 +74,7 @@ def unpack_property_metadata(property_descriptor):
             # enum_items_static (because plain "enum_items" crashes blender.)
             enum = []
             output["items"] = enum
-            for (enum_name, desc) in property_descriptor.enum_items_static.items():
+            for (_enum_name, desc) in property_descriptor.enum_items_static.items():
                 enum.append({
                     "id": desc.identifier,
                     "name": desc.name,
@@ -85,10 +86,14 @@ def unpack_property_metadata(property_descriptor):
 
         case bpy.types.CollectionProperty:
             output["fixed_type"] = property_descriptor.fixed_type.identifier
+            if hasattr(property_descriptor, 'srna') and property_descriptor.srna is not None:
+                output["collection"] = property_descriptor.srna.identifier
+            POINTERS.append(output)
             return {"collection": output}
 
         case bpy.types.PointerProperty:
             output["fixed_type"] = property_descriptor.fixed_type.identifier
+            POINTERS.append(output)
             return {"pointer": output}
 
         case bpy.types.FloatProperty:
@@ -141,7 +146,6 @@ def unpack_property_metadata(property_descriptor):
             raise Exception("Unexpected type")
 
 
-
 def inspect_bpy_type(typ, output):
     props = {}
     methods = {}
@@ -164,10 +168,13 @@ def inspect_bpy_type(typ, output):
     for (prop_name, descriptor) in typ.bl_rna.properties.items():
         if prop_name == 'bl_rna':
             continue
-        props[prop_name] = unpack_property_metadata(descriptor)
+        props[prop_name] = unpack_property_metadata(descriptor, typ.__name__)
 
+
+CLASSES = set()
 def inspect_recursive(tree, parent = object, output = []):
     for (cls, item) in tree.items():
+        CLASSES.add(cls.__name__)
         result = {"name": cls.__name__, "parent": parent.__name__}
         output.append(result)
         inspect_bpy_type(cls, result)
@@ -175,7 +182,18 @@ def inspect_recursive(tree, parent = object, output = []):
 
     return output
 
+
 classes = inspect_recursive(root[object])
+
+
+# fixup "bad" pointers: pointers and collections may refer to types
+# outside of `bpy.types` (in particular, to objects in the Cycles
+# renderer.)
+for pointer in POINTERS:
+    if pointer['fixed_type'] not in CLASSES:
+        pointer['fixed_type'] = 'bpy_struct'
+
+
 print(json.dumps(classes, indent=2))
 
 # print(dir(bpy.types.Object.bl_rna))
