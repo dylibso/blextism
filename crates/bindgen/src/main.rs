@@ -1,8 +1,9 @@
 use serde::{ Serialize, Deserialize };
-use std::{collections::HashMap, io::Read};
+use std::collections::{HashMap, HashSet};
 use smartstring::alias::String;
 use quote::{quote, format_ident};
 use proc_macro2::TokenStream;
+use heck::ToUpperCamelCase;
 
 #[derive(Deserialize, Debug, Serialize)]
 enum BpyType {
@@ -239,6 +240,7 @@ enum BpyProperty {
         #[serde(flatten)]
         item: BpyPropertyItem,
         fixed_type: String,
+        collection: Option<String>,
     },
 }
 
@@ -256,10 +258,10 @@ struct BpyStructure {
     methods: HashMap<String, BpyMethod>,
 }
 
-fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, TokenStream) {
+fn property_codegen(properties: &HashMap<String, BpyProperty>, defined: &mut HashSet<std::string::String>) -> (TokenStream, TokenStream, TokenStream) {
     let mut impl_members: Vec<TokenStream> = Vec::with_capacity(16);
     let mut trait_members: Vec<TokenStream> = Vec::with_capacity(16);
-    let mut enums: Vec<()> = Vec::with_capacity(16);
+    let mut extra_items: Vec<TokenStream> = Vec::with_capacity(16);
 
     for (func_name, property) in properties {
         let func_name = func_name.as_str();
@@ -291,7 +293,7 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                     fn #getter(&self) -> #t {
                         let args = PyArgs::new(self);
 
-                        let result = invoke_bpy_getattr(#func_name, args).into_inner();
+                        let result = invoke_bpy_getattr(#func_name, args);
                         let result: #t = serde_json::from_value(result).expect("TKTK(improve this msg): expected an boolean value");
                         result
                     }
@@ -333,7 +335,7 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                     fn #getter(&self) -> #t_out {
                         let args = PyArgs::new(self);
 
-                        let result = invoke_bpy_getattr(#func_name, args).into_inner();
+                        let result = invoke_bpy_getattr(#func_name, args);
                         let result: #t_out = serde_json::from_value(result).expect("TKTK(improve this msg): expected an boolean value");
                         result
                     }
@@ -377,7 +379,7 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                     fn #getter(&self) -> #t {
                         let args = PyArgs::new(self);
 
-                        let result = invoke_bpy_getattr(#func_name, args).into_inner();
+                        let result = invoke_bpy_getattr(#func_name, args);
                         let result: #t = serde_json::from_value(result).expect("TKTK(improve this msg): expected an integer value");
                         result
                     }
@@ -426,7 +428,7 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                     fn #getter(&self) -> #t_out {
                         let args = PyArgs::new(self);
 
-                        let result = invoke_bpy_getattr(#func_name, args).into_inner();
+                        let result = invoke_bpy_getattr(#func_name, args);
                         let result: #t_out = serde_json::from_value(result).expect("TKTK(improve this msg): expected a list of integer values");
                         result
                     }
@@ -465,7 +467,7 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                     fn #getter(&self) -> #t {
                         let args = PyArgs::new(self);
 
-                        let result = invoke_bpy_getattr(#func_name, args).into_inner();
+                        let result = invoke_bpy_getattr(#func_name, args);
                         let result: #t = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
                         result
                     }
@@ -508,7 +510,7 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                     fn #getter(&self) -> #t_out {
                         let args = PyArgs::new(self);
 
-                        let result = invoke_bpy_getattr(#func_name, args).into_inner();
+                        let result = invoke_bpy_getattr(#func_name, args);
                         let result: #t_out = serde_json::from_value(result).expect("TKTK(improve this msg): expected a list of floating-point values");
                         result
                     }
@@ -552,7 +554,7 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                     fn #getter(&self) -> #t_out {
                         let args = PyArgs::new(self);
 
-                        let result = invoke_bpy_getattr(#func_name, args).into_inner();
+                        let result = invoke_bpy_getattr(#func_name, args);
                         let result: #t_out = serde_json::from_value(result).expect("TKTK(improve this msg): expected a string");
                         result
                     }
@@ -577,11 +579,11 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                 };
 
 
-                let out_type = format_ident!("{}", fixed_type.as_str());
+                let target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
                 let out_type = if item.is_never_none {
-                    quote! { Box<dyn #out_type + Send + Sync> }
+                    quote! { Box<dyn #target_type + Send + Sync> }
                 } else {
-                    quote! { Option<Box<dyn #out_type + Send + Sync>> }
+                    quote! { Option<Box<dyn #target_type + Send + Sync>> }
                 };
 
                 let getter = format_ident!("get_{}", func_name);
@@ -594,19 +596,34 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                 };
                 trait_members.push(quote! {
                     #description
-                    fn #getter(&self) -> #t;
+                    fn #getter(&self) -> #out_type;
                     fn #setter(&self, arg: #t);
                 });
+
+                let unwrap = if item.is_never_none {
+                    quote! {
+                        let result: BpyPtr = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
+                        let result = Box::new(result) as Box<dyn #target_type + Send + Sync>;
+                    }
+                } else {
+                    quote! {
+                        let result: Option<BpyPtr> = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
+
+                        let result = match result {
+                            Some(xs) => Some(Box::new(xs) as Box<dyn #target_type + Send + Sync>),
+                            None => None,
+                        };
+                    }
+                };
 
                 // impl for BpyPtr
                 impl_members.push(quote! {
                     fn #getter(&self) -> #out_type {
                         let args = PyArgs::new(self);
 
-                        let result = invoke_bpy_getattr(#func_name, args).into_inner();
-                        let result: #t = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
-
-                        result as #out_type
+                        let result = invoke_bpy_getattr(#func_name, args);
+                        #unwrap
+                        result
                     }
 
                     fn #setter(&self, arg: #t) {
@@ -617,23 +634,38 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                 });
             },
 
-            BpyProperty::Collection { item, fixed_type } => {
-                let t = if item.is_never_none {
-                    quote! { BpyPtr }
-                } else {
-                    quote! { Option<BpyPtr> }
-                };
+            // TODO: BpyProperty::Collection isn't JUST a vec
+            // it should return a Box<dyn #collection>; though
+            // it might need to "mix in" a `bpy_prop_collection` type?
+            BpyProperty::Collection { item, fixed_type, collection } => {
+                let collection_constraint = collection.as_ref().map(|c| {
+                    let ident = format_ident!("{}", c.as_str().to_upper_camel_case());
+                    quote! { : #ident + BpyPropCollection }
+                }).unwrap_or_else(|| {
+                    quote! { : BpyStruct + BpyPropCollection }
+                });
 
+                let target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
+                let return_type_str = format!("BpyPropCollection_{}", collection.as_ref().unwrap_or(fixed_type)).to_upper_camel_case();
+                let return_type_ident = format_ident!("{}", return_type_str);
 
-                let out_type = format_ident!("{}", fixed_type.as_str());
+                // TODO: how to push the target_type back up?
+                if !defined.contains(&return_type_str) {
+                    defined.insert(return_type_str);
+                    extra_items.push(quote! {
+                        pub trait #return_type_ident #collection_constraint {}
+
+                        impl #return_type_ident for BpyPtr {}
+                    });
+                }
+
                 let out_type = if item.is_never_none {
-                    quote! { Box<dyn #out_type + Send + Sync> }
+                    quote! { Box<dyn #return_type_ident + Send + Sync> }
                 } else {
-                    quote! { Option<Box<dyn #out_type + Send + Sync>> }
+                    quote! { Option<Box<dyn #return_type_ident + Send + Sync>> }
                 };
 
                 let getter = format_ident!("get_{}", func_name);
-                let setter = format_ident!("set_{}", func_name);
                 let description = item.description.as_ref().map(|xs| xs.as_str());
                 let description = if let Some(desc) = description {
                     quote! { #[doc = #desc] }
@@ -642,25 +674,32 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
                 };
                 trait_members.push(quote! {
                     #description
-                    fn #getter(&self) -> #t;
-                    fn #setter(&self, arg: #t);
+                    fn #getter(&self) -> #out_type;
                 });
 
+                let unwrap = if item.is_never_none {
+                    quote! {
+                        let result: BpyPtr = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
+                        let result = Box::new(result) as Box<dyn #return_type_ident + Send + Sync>;
+                    }
+                } else {
+                    quote! {
+                        let result: Option<BpyPtr> = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
+
+                        let result = match result {
+                            Some(xs) => Some(Box::new(xs) as Box<dyn #return_type_ident + Send + Sync>),
+                            None => None,
+                        };
+                    }
+                };
                 // impl for BpyPtr
                 impl_members.push(quote! {
                     fn #getter(&self) -> #out_type {
                         let args = PyArgs::new(self);
 
-                        let result = invoke_bpy_getattr(#func_name, args).into_inner();
-                        let result: #t = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
-
-                        result as #out_type
-                    }
-
-                    fn #setter(&self, arg: #t) {
-                        let args = PyArgs::args(self, arg);
-
-                        invoke_bpy_setattr(#func_name, args);
+                        let result = invoke_bpy_getattr(#func_name, args);
+                        #unwrap
+                        result
                     }
                 });
             },
@@ -669,20 +708,39 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>) -> (TokenStream, 
         }
     }
 
-    (trait_members.into_iter().collect(), impl_members.into_iter().collect())
+    (extra_items.into_iter().collect(), trait_members.into_iter().collect(), impl_members.into_iter().collect())
 }
 
-fn structure_to_syntax(structure: BpyStructure) -> TokenStream {
+fn structure_to_syntax(structure: BpyStructure, defined: &mut HashSet<std::string::String>) -> TokenStream {
     if structure.name == "type" {
         return quote!{}
     }
 
     let is_top = structure.parent == "object" || structure.parent == "type";
-    eprintln!("is_top={}; name={}; parent={}", is_top, structure.name, structure.parent);
-    let name = format_ident!("{}", structure.name.as_str());
-    let parent = format_ident!("{}", structure.parent.as_str());
+    let name = format_ident!("{}", structure.name.as_str().to_upper_camel_case());
+    let parent = format_ident!("{}", structure.parent.as_str().to_upper_camel_case());
 
-    let (trait_members, impl_members) = property_codegen(&structure.properties);
+    let (extra_items, mut trait_members, mut impl_members) = property_codegen(&structure.properties, defined);
+
+    #[allow(clippy::single_match)]
+    match structure.name.as_str() {
+        "bpy_prop_collection" => {
+            trait_members.extend(quote! {
+                fn get(&self, key: &str) -> Option<BpyPtr>;
+            });
+
+            impl_members.extend(quote! {
+                fn get(&self, key: &str) -> Option<BpyPtr> {
+                    let args = PyArgs::args(self, key);
+                    let result = invoke_bpy_callmethod("get", args);
+                    let result: Option<BpyPtr> = serde_json::from_value(result).expect("TKTK");
+                    result
+                }
+            });
+        },
+
+        _ => {}
+    }
 
     let parent = if !is_top {
         quote! { : #parent }
@@ -691,6 +749,8 @@ fn structure_to_syntax(structure: BpyStructure) -> TokenStream {
     };
 
     quote! {
+        #extra_items
+
         pub trait #name #parent {
             #trait_members
         }
@@ -705,27 +765,87 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let input = std::env::args().nth(1).unwrap_or_else(|| {
         "/dev/stdin".to_string()
     });
-    eprintln!("input={:?}", input);
     let file = std::fs::OpenOptions::new()
         .read(true)
         .open(input.as_str())?;
 
+    let mut defined = HashSet::new();
     let structures: Vec<BpyStructure> = serde_json::from_reader(std::io::BufReader::new(file))?;
-    let results: Vec<_> = structures.into_iter().rev().map(structure_to_syntax).collect();
+    let results: Vec<_> = structures.into_iter().rev().map(|xs| structure_to_syntax(xs, &mut defined)).collect();
 
     let results: TokenStream = results.into_iter().collect();
 
+    let data_targets = [
+        ("actions", "BlendDataActions"),
+        ("armatures", "BlendDataArmatures"),
+        ("bl_rna", "Struct"),
+        ("brushes", "BlendDataBrushes"),
+        ("cache_files", "BlendDataCacheFiles"),
+        ("cameras", "BlendDataCameras"),
+        ("collections", "BlendDataCollections"),
+        ("curves", "BlendDataCurves"),
+        ("fonts", "BlendDataFonts"),
+        ("grease_pencils", "BlendDataGreasePencils"),
+        ("hair_curves", "BlendDataHairCurves"),
+        ("images", "BlendDataImages"),
+        ("lattices", "BlendDataLattices"),
+        ("libraries", "BlendDataLibraries"),
+        ("lightprobes", "BlendDataProbes"),
+        ("lights", "BlendDataLights"),
+        ("linestyles", "BlendDataLineStyles"),
+        ("masks", "BlendDataMasks"),
+        ("materials", "BlendDataMaterials"),
+        ("meshes", "BlendDataMeshes"),
+        ("metaballs", "BlendDataMetaBalls"),
+        ("movieclips", "BlendDataMovieClips"),
+        ("node_groups", "BlendDataNodeTrees"),
+        ("objects", "BlendDataObjects"),
+        ("paint_curves", "BlendDataPaintCurves"),
+        ("palettes", "BlendDataPalettes"),
+        ("particles", "BlendDataParticles"),
+        ("pointclouds", "BlendDataPointClouds"),
+        ("rna_type", "Struct"),
+        ("scenes", "BlendDataScenes"),
+        ("screens", "BlendDataScreens"),
+        ("sounds", "BlendDataSounds"),
+        ("speakers", "BlendDataSpeakers"),
+        ("texts", "BlendDataTexts"),
+        ("textures", "BlendDataTextures"),
+        ("volumes", "BlendDataVolumes"),
+        ("window_managers", "BlendDataWindowManagers"),
+        ("workspaces", "BlendDataWorkSpaces"),
+        ("worlds", "BlendDataWorlds")
+    ];
+
+    let mut bpy_data_items: Vec<_> = Vec::with_capacity(data_targets.len());
+    let mut bpy_data_impls: Vec<_> = Vec::with_capacity(data_targets.len());
+    for (func, target) in data_targets {
+        let func = format_ident!("{}", func);
+        let target = format_ident!("{}", format!("BpyPropCollection_{}", target).to_upper_camel_case());
+        bpy_data_items.push(quote! {
+            #func: i64,
+        });
+        bpy_data_impls.push(quote! {
+            pub fn #func() -> Box<dyn super::types::#target + Send + Sync> {
+                Box::new(BpyPtr { ptr: load_bpy_data().#func })
+            }
+        });
+    }
+
+    let bpy_data_items: TokenStream = bpy_data_items.into_iter().collect();
+    let bpy_data_impls: TokenStream = bpy_data_impls.into_iter().collect();
+
     let module = quote! {
-        mod bpy {
+        pub(crate) mod bpy {
             use serde::{ Deserialize, Serialize };
             use smartstring::alias::String;
+            use crate::{ invoke_bpy_setattr, invoke_bpy_getattr, invoke_bpy_callmethod };
+            use std::collections::HashMap;
 
-            #[derive(Serialize, Deserialize, Clone)]
+            #[derive(Serialize, Deserialize, Clone, Debug)]
             pub struct BpyPtr {
                 #[serde(rename = "@ptr")]
-                ptr: usize,
-                #[serde(rename = "@cls")]
-                cls: String,
+                ptr: i64,
             }
 
             #[derive(Serialize, Deserialize, Default)]
@@ -733,28 +853,63 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 #[serde(rename = "self")]
                 target: Option<BpyPtr>,
                 args: Option<Vec<serde_json::Value>>,
-                kwargs: Option<serde_json::Map<String, serde_json::Value>>
+                kwargs: Option<HashMap<String, serde_json::Value>>,
             }
 
             impl PyArgs {
-                fn new(target: &BpyPtr) {
+                fn new(target: &BpyPtr) -> Self {
                     Self {
                         target: Some(target.clone()),
                         ..Default::default()
                     }
                 }
 
-                fn args(target: &BpyPtr, args: impl Serialize) {
+                fn args(target: &BpyPtr, args: impl Serialize) -> Self {
                     let value = serde_json::to_value(args).expect("pyarg must be serializable");
                     Self {
                         target: Some(target.clone()),
-                        args: vec![value],
+                        args: Some(vec![value]),
                         ..Default::default()
                     }
                 }
             }
 
-            #results
+            pub mod types {
+                use super::*;
+                #results
+            }
+
+            pub mod data {
+                use super::*;
+                use extism_pdk;
+
+                #[derive(Deserialize)]
+                struct BpyData {
+                    #bpy_data_items
+                }
+
+                static mut BPY_DATA: Option<BpyData> = None;
+
+                fn load_bpy_data() -> &'static BpyData {
+                    if let Some(data) = unsafe { BPY_DATA.as_ref() } {
+                        return data;
+                    }
+
+                    let cfg = extism_pdk::config::get("bpy.data");
+                    let data: BpyData = serde_json::from_str(
+                           cfg 
+                                .expect("'bpy.data' extism config must be set")
+                                .expect("'bpy.data' should be set")
+                                .as_str(),
+                        )
+                        .expect("'bpy.data' must contain valid JSON");
+
+                    unsafe { BPY_DATA = Some(data) };
+                    load_bpy_data()
+                }
+
+                #bpy_data_impls
+            }
         }
     };
 
