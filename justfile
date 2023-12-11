@@ -21,7 +21,7 @@ _schema:
 build: _schema
   cargo build --release -p blender-extism-wasm-bindgen
   <schema.json target/release/blender-extism-wasm-bindgen > crates/pdk/src/bindings.rs
-  cargo build --release --target wasm32-wasi -p pdk
+  cargo build --release --target wasm32-wasi -p plugin
 
 run: build
   blender --log-level 3 --factory-startup -b -P run.py

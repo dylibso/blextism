@@ -35,6 +35,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "blender-extism-wasm-pdk"
+version = "0.0.0+replaced-by-ci"
+dependencies = [
+ "extism-pdk",
+ "serde",
+ "serde_json",
+ "smartstring",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -139,13 +149,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 
 [[package]]
-name = "pdk"
+name = "plugin"
 version = "0.0.0+replaced-by-ci"
 dependencies = [
+ "blender-extism-wasm-pdk",
  "extism-pdk",
- "serde",
- "serde_json",
- "smartstring",
 ]
 
 [[package]]

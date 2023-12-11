@@ -1,0 +1,5 @@
+{
+  "wasm": [{
+    "path": "./target/wasm32-wasi/release/plugin.wasm"
+  }]
+}

@@ -1,21 +1,7 @@
-
-try:
-    import extism
-except ImportError:
-    from pip._internal import main as pipmain
-    pipmain(['install', 'extism==1.0.0rc1'])
-try:
-    import typing_extensions
-except ImportError:
-    from pip._internal import main as pipmain
-    pipmain(['install', 'typing_extensions'])
-
 import builtins
 import bpy
 import json
 import typing
-import typing_extensions
-from extism import host_fn, Plugin
 from pprint import pprint
 
 def main():

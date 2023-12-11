@@ -868,7 +868,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let bpy_data_impls: TokenStream = bpy_data_impls.into_iter().collect();
 
     let module = quote! {
-        pub(crate) mod bpy {
+        pub mod bpy {
             use serde::{ Deserialize, Serialize };
             use smartstring::alias::String;
             use crate::{ invoke_bpy_setattr, invoke_bpy_getattr, invoke_bpy_callmethod };
@@ -878,10 +878,20 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 pub trait Sealed {}
             }
 
-            #[derive(Serialize, Deserialize, Clone, Debug)]
+            #[derive(Serialize, Deserialize, Clone)]
             pub struct BpyPtr {
                 #[serde(rename = "@ptr")]
                 ptr: i64,
+            }
+
+            impl std::fmt::Debug for BpyPtr {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+                    let args = PyArgs::new(self);
+                    let result: Option<String> = serde_json::from_value(invoke_bpy_callmethod("__repr__", args)).ok().flatten();
+                    f.debug_struct("BpyPtr")
+                        .field("__repr__", &result)
+                        .finish()
+                }
             }
 
             impl private::Sealed for BpyPtr {}

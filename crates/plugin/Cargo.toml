@@ -1,5 +1,5 @@
 [package]
-name = "blender-extism-wasm-pdk"
+name = "plugin"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -8,7 +8,8 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+blender-extism-wasm-pdk = { workspace = true }
 extism-pdk = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-smartstring = { workspace = true }
+
+[lib]
+crate_type = ["cdylib"]

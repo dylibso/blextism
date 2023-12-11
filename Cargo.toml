@@ -9,3 +9,10 @@ license = "MIT"
 homepage = "https://www.neversaw.us/"
 repository = "https://github.com/chrisdickinson/blender-extism-wasm"
 version = "0.0.0+replaced-by-ci"
+
+[workspace.dependencies]
+blender-extism-wasm-pdk = { path = "./crates/pdk", version = "0.0.0+replaced-by-ci" }
+extism-pdk = "1.0.0-rc1"
+serde = { version = "1.0.193", features = ["derive"] }
+serde_json = "1.0.108"
+smartstring = { version = "1.0.1", features = ["serde"] }
