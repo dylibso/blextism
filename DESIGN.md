@@ -49,3 +49,12 @@ two unique pieces of data
 
 trait
 
+----
+
+- extras
+- methods
+- speed up generation
+- ops
+
+
+

@@ -245,9 +245,27 @@ enum BpyProperty {
 }
 
 #[derive(Deserialize, Debug, Serialize)]
-struct BpyMethod {
-    #[serde(rename = "type")]
-    kind: String
+#[serde(tag = "type", content = "item")]
+enum BpyMethod {
+    #[serde(rename = "rna")]
+    Rna {
+        description: String,
+        use_self: bool,
+        use_self_type: bool,
+        parameters: Vec<BpyProperty>
+    },
+
+    #[serde(rename = "builtin_function_or_method")]
+    Builtin,
+
+    #[serde(rename = "method_descriptor")]
+    MethodDescriptor,
+    #[serde(rename = "_PropertyDeferred")]
+    PropertyDeferred,
+    #[serde(rename = "function")]
+    Function,
+    #[serde(rename = "method")]
+    Method,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -578,7 +596,6 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>, defined: &mut Has
                     quote! { Option<BpyPtr> }
                 };
 
-
                 let target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
                 let out_type = if item.is_never_none {
                     quote! { Box<dyn #target_type + Send + Sync> }
@@ -653,9 +670,31 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>, defined: &mut Has
                 if !defined.contains(&return_type_str) {
                     defined.insert(return_type_str);
                     extra_items.push(quote! {
-                        pub trait #return_type_ident #collection_constraint {}
+                        pub trait #return_type_ident #collection_constraint {
+                            fn get(&self, key: &str) -> Option<Box<dyn #target_type + Send + Sync>>;
+                            fn keys(&self) -> Vec<String>;
+                            fn values(&self) -> Vec<Box<dyn #target_type + Send + Sync>>;
+                            fn items(&self) -> Vec<(String, Box<dyn #target_type + Send + Sync>)>;
+                        }
 
-                        impl #return_type_ident for BpyPtr {}
+                        impl #return_type_ident for BpyPtr {
+                            fn get(&self, key: &str) -> Option<Box<dyn #target_type + Send + Sync>> {
+                                get(self, key)
+                                    .map(Box::new)
+                                    .map(|bx| bx as Box<dyn #target_type + Send + Sync>)
+                            }
+                            fn keys(&self) -> Vec<String> {
+                                keys(self)
+                            }
+
+                            fn values(&self) -> Vec<Box<dyn #target_type + Send + Sync>> {
+                                values(self).into_iter().map(|xs| Box::new(xs) as Box<dyn #target_type + Send + Sync>).collect()
+                            }
+
+                            fn items(&self) -> Vec<(String, Box<dyn #target_type + Send + Sync>)> {
+                                items(self).into_iter().map(|(k, xs)| (k, Box::new(xs) as Box<dyn #target_type + Send + Sync>)).collect()
+                            }
+                        }
                     });
                 }
 
@@ -717,35 +756,28 @@ fn structure_to_syntax(structure: BpyStructure, defined: &mut HashSet<std::strin
     }
 
     let is_top = structure.parent == "object" || structure.parent == "type";
-    let name = format_ident!("{}", structure.name.as_str().to_upper_camel_case());
+    let structure_name = structure.name.as_str().to_upper_camel_case();
+    let name = format_ident!("{}", structure_name);
     let parent = format_ident!("{}", structure.parent.as_str().to_upper_camel_case());
 
     let (extra_items, mut trait_members, mut impl_members) = property_codegen(&structure.properties, defined);
 
-    #[allow(clippy::single_match)]
-    match structure.name.as_str() {
-        "bpy_prop_collection" => {
-            trait_members.extend(quote! {
-                fn get(&self, key: &str) -> Option<BpyPtr>;
-            });
+    if structure_name.as_str() == "BpyStruct" {
+        trait_members.extend(quote! {
+            fn to_bpy_ptr(&self) -> BpyPtr;
+        });
 
-            impl_members.extend(quote! {
-                fn get(&self, key: &str) -> Option<BpyPtr> {
-                    let args = PyArgs::args(self, key);
-                    let result = invoke_bpy_callmethod("get", args);
-                    let result: Option<BpyPtr> = serde_json::from_value(result).expect("TKTK");
-                    result
-                }
-            });
-        },
-
-        _ => {}
+        impl_members.extend(quote! {
+            fn to_bpy_ptr(&self) -> BpyPtr {
+                self.clone()
+            }
+        });
     }
 
     let parent = if !is_top {
         quote! { : #parent }
     } else {
-        quote! { }
+        quote! { : std::fmt::Debug + private::Sealed }
     };
 
     quote! {
@@ -842,11 +874,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             use crate::{ invoke_bpy_setattr, invoke_bpy_getattr, invoke_bpy_callmethod };
             use std::collections::HashMap;
 
+            mod private {
+                pub trait Sealed {}
+            }
+
             #[derive(Serialize, Deserialize, Clone, Debug)]
             pub struct BpyPtr {
                 #[serde(rename = "@ptr")]
                 ptr: i64,
             }
+
+            impl private::Sealed for BpyPtr {}
 
             #[derive(Serialize, Deserialize, Default)]
             pub struct PyArgs {
@@ -876,46 +914,78 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             pub mod types {
                 use super::*;
+                fn get(ptr: &BpyPtr, key: &str) -> Option<BpyPtr> {
+                    let args = PyArgs::args(ptr, key);
+                    let result = invoke_bpy_callmethod("get", args);
+                    let result: Option<BpyPtr> = serde_json::from_value(result).expect("TKTK");
+                    result
+                }
+
+                fn keys(ptr: &BpyPtr) -> Vec<String> {
+                    let args = PyArgs::new(ptr);
+                    let result = invoke_bpy_callmethod("keys", args);
+                    let result: Vec<String> = serde_json::from_value(result).expect("TKTK");
+                    result
+                }
+
+                fn values(ptr: &BpyPtr) -> Vec<BpyPtr> {
+                    let args = PyArgs::new(ptr);
+                    let result = invoke_bpy_callmethod("values", args);
+                    let result: Vec<BpyPtr> = serde_json::from_value(result).expect("TKTK");
+                    result
+                }
+
+                fn items(ptr: &BpyPtr) -> Vec<(String, BpyPtr)> {
+                    let args = PyArgs::new(ptr);
+                    let result = invoke_bpy_callmethod("items", args);
+                    let result: Vec<(String, BpyPtr)> = serde_json::from_value(result).expect("TKTK");
+                    result
+                }
+
                 #results
+            }
+
+            #[derive(Deserialize)]
+            struct BpyData {
+                context: i64,
+                #bpy_data_items
+            }
+
+            static mut BPY_DATA: Option<BpyData> = None;
+
+            fn load_bpy_data() -> &'static BpyData {
+                if let Some(data) = unsafe { BPY_DATA.as_ref() } {
+                    return data;
+                }
+
+                let cfg = extism_pdk::config::get("bpy.data");
+                let data: BpyData = serde_json::from_str(
+                       cfg 
+                            .expect("'bpy.data' extism config must be set")
+                            .expect("'bpy.data' should be set")
+                            .as_str(),
+                    )
+                    .expect("'bpy.data' must contain valid JSON");
+
+                unsafe { BPY_DATA = Some(data) };
+                load_bpy_data()
             }
 
             pub mod data {
                 use super::*;
                 use extism_pdk;
 
-                #[derive(Deserialize)]
-                struct BpyData {
-                    #bpy_data_items
-                }
-
-                static mut BPY_DATA: Option<BpyData> = None;
-
-                fn load_bpy_data() -> &'static BpyData {
-                    if let Some(data) = unsafe { BPY_DATA.as_ref() } {
-                        return data;
-                    }
-
-                    let cfg = extism_pdk::config::get("bpy.data");
-                    let data: BpyData = serde_json::from_str(
-                           cfg 
-                                .expect("'bpy.data' extism config must be set")
-                                .expect("'bpy.data' should be set")
-                                .as_str(),
-                        )
-                        .expect("'bpy.data' must contain valid JSON");
-
-                    unsafe { BPY_DATA = Some(data) };
-                    load_bpy_data()
-                }
-
                 #bpy_data_impls
+            }
+
+            pub fn context() -> Box<dyn types::Context + Send + Sync> {
+                Box::new(BpyPtr { ptr: load_bpy_data().context })
             }
         }
     };
 
     let syntree = syn::parse2(module)?;
     println!("{}", prettyplease::unparse(&syntree));
-
 
     Ok(())
 }

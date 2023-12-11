@@ -34,31 +34,20 @@ pub(crate) fn invoke_bpy_callmethod(method: &str, args: PyArgs) -> serde_json::V
 
 #[plugin_fn]
 pub fn example() -> FnResult<()> {
-    let input = extism_pdk::input_bytes();
-    let bpy_ptr: bpy::BpyPtr = match serde_json::from_slice(input.as_slice()) {
-        Ok(bpy) => bpy,
-        Err(e) => {
-            extism_pdk::error!("input={:?}", input.as_slice());
-            extism_pdk::error!("{:?}", e);
-            return Ok(())
-        }
-    };
-
-    let as_object = Box::new(bpy_ptr) as Box<dyn bpy::types::Object>;
-
-    if let Some(mut scale) = as_object.get_scale() {
-        extism_pdk::info!("scale={:?}", scale);
-        scale[0] = 6.0;
-        as_object.set_scale(Some(scale.as_slice()));
-    }
-
-    eprintln!("hello world!");
-    // broken:
-    as_object.get_modifiers();
-
     let objs = bpy::data::objects();
 
-    eprintln!("got {:?}", objs.get("Cube"));
+    let Some(cube) = bpy::data::objects().get("Cube") else {
+        return Ok(())
+    };
+
+    if let Some(mut scale) = cube.get_scale() {
+        extism_pdk::info!("scale={:?}", scale);
+        scale[0] = 6.0;
+        cube.set_scale(Some(scale.as_slice()));
+    }
+
+    eprintln!("hello world! {:?}", bpy::data::objects().items());
+    eprintln!("but wait! {:?}", bpy::context().get_active_object());
 
     Ok(())
 }

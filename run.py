@@ -54,7 +54,11 @@ def _lift(value) -> Any:
 
 def _lower(value) -> Any:
     if isinstance(value, list):
-        return map(_lower, value)
+        print(value)
+        return [*map(_lower, value)]
+
+    if isinstance(value, tuple):
+        return tuple(map(_lower, value))
 
     if isinstance(value, dict):
         return dict(map(lambda xs: (xs[0], _lower(xs[1])), value.items()))
@@ -137,12 +141,12 @@ def main():
     bpy_data = ['actions', 'armatures', 'batch_remove', 'bl_rna', 'brushes', 'cache_files', 'cameras', 'collections', 'curves', 'filepath', 'fonts', 'grease_pencils', 'hair_curves', 'images', 'is_dirty', 'is_saved', 'lattices', 'libraries', 'lightprobes', 'lights', 'linestyles', 'masks', 'materials', 'meshes', 'metaballs', 'movieclips', 'node_groups', 'objects', 'orphans_purge', 'paint_curves', 'palettes', 'particles', 'pointclouds', 'rna_type', 'scenes', 'screens', 'shape_keys', 'sounds', 'speakers', 'temp_data', 'texts', 'textures', 'use_autopack', 'user_map', 'version', 'volumes', 'window_managers', 'workspaces', 'worlds']
 
     plugin = Plugin(manifest, wasi=True, config={
-        'bpy.data': json.dumps(dict(
+        'bpy.data': json.dumps({'context': encode_bpy_struct(bpy.context)} | dict(
             ((key, encode_bpy_struct(getattr(bpy.data, key))) for key in bpy_data)
         ))
     })
 
-    plugin.call("example", json.dumps(_lower(bpy.data.objects['Cube'])))
+    plugin.call("example", "")
     bpy.ops.wm.save_as_mainfile(filepath="foo.blend")
 
 if __name__ == '__main__':
