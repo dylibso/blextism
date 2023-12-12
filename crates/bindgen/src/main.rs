@@ -603,10 +603,6 @@ fn method_codegen(methods: &HashMap<String, BpyMethod>, defined: &mut HashSet<st
                         #from_serde_value
                     }
                 });
-
-                if let Err(e) = syn::parse2::<syn::File>(impl_members.last().unwrap().clone()) {
-                    eprintln!("{}", impl_members.last().unwrap());
-                }
             },
             BpyMethod::Builtin => {},
             BpyMethod::MethodDescriptor => {},
@@ -716,6 +712,66 @@ fn structure_to_syntax(structure: BpyStructure, defined: &mut HashSet<std::strin
     }
 }
 
+#[derive(Deserialize, Debug, Serialize)]
+struct BpyOperator {
+    description: String,
+    parameters: Vec<BpyProperty>
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+struct Schema {
+    classes: Vec<BpyStructure>,
+    operators: HashMap<String, HashMap<String, BpyOperator>>
+}
+
+fn ops_codegen(ops: HashMap<String, HashMap<String, BpyOperator>>) -> TokenStream {
+    let mut tkstream = TokenStream::new();
+    let mut extra_items: Vec<TokenStream> = Vec::with_capacity(16);
+    for (mod_name, items) in ops.into_iter() {
+        let mod_name_str = mod_name.as_str().to_snek_case();
+        let mod_name_ident = safe_ident(mod_name_str.as_str());
+
+        let mut ops = TokenStream::new();
+        for (op_name, descriptor) in items.into_iter() {
+            let op_name_str = op_name.as_str().to_snek_case();
+            let op_name_ident = safe_ident(op_name_str.as_str());
+            let inputs: Vec<_> = descriptor.parameters.iter().filter(|xs| {
+                !xs.is_output()
+            }).collect();
+
+            let params: TokenStream = inputs.iter()
+                .map(|prop| prop.as_method_parameter(&mut extra_items))
+                .reduce(|stream, tk| { quote! { #stream, #tk } })
+                .unwrap_or_default();
+
+            let into_pyargs: TokenStream = inputs.iter()
+                .map(|prop| {
+                    let prop = prop.as_item().identifier.as_str().to_snek_case();
+                    let prop = safe_ident(prop.as_str());
+                    quote! { serde_json::to_value(#prop).expect("pyarg must be serializable"), }
+                })
+                .reduce(|stream, tk| { quote! { #stream serde_json::to_value(#tk).expect("pyarg must be serializable"), } })
+                .unwrap_or_default();
+
+            ops.extend(quote! {
+                pub fn #op_name_ident (#params) -> serde_json::Value {
+                    let args = PyArgs::for_operator(vec![#into_pyargs]);
+                    invoke_bpy_operator(#mod_name_str, #op_name_str, args)
+                }
+            })
+
+        }
+
+        tkstream.extend(quote! {
+            pub mod #mod_name_ident {
+                use super::*;
+                #ops
+            }
+        });
+    }
+    tkstream
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let input = std::env::args().nth(1).unwrap_or_else(|| {
         "/dev/stdin".to_string()
@@ -725,8 +781,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .open(input.as_str())?;
 
     let mut defined = HashSet::new();
-    let structures: Vec<BpyStructure> = serde_json::from_reader(std::io::BufReader::new(file))?;
-    let results: Vec<_> = structures.into_iter().rev().map(|xs| structure_to_syntax(xs, &mut defined)).collect();
+    let Schema { classes, operators } = serde_json::from_reader(std::io::BufReader::new(file))?;
+    let results: Vec<_> = classes.into_iter().rev().map(|xs| structure_to_syntax(xs, &mut defined)).collect();
 
     let results: TokenStream = results.into_iter().collect();
 
@@ -789,12 +845,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let bpy_data_items: TokenStream = bpy_data_items.into_iter().collect();
     let bpy_data_impls: TokenStream = bpy_data_impls.into_iter().collect();
+    let bpy_ops: TokenStream = ops_codegen(operators);
 
     let module = quote! {
         pub mod bpy {
             use serde::{ Deserialize, Serialize };
             use smartstring::alias::String;
-            use crate::{ invoke_bpy_setattr, invoke_bpy_getattr, invoke_bpy_callmethod };
+            use crate::{ invoke_bpy_setattr, invoke_bpy_getattr, invoke_bpy_callmethod, invoke_bpy_operator };
             use std::collections::HashMap;
 
             mod private {
@@ -828,6 +885,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
 
             impl PyArgs {
+                fn for_operator(args: Vec<serde_json::Value>) -> Self {
+                    Self {
+                        args: Some(args),
+                        ..Default::default()
+                    }
+                }
+
                 fn new(target: &BpyPtr) -> Self {
                     Self {
                         target: Some(target.clone()),
@@ -917,6 +981,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 use extism_pdk;
 
                 #bpy_data_impls
+            }
+
+            pub mod ops {
+                use super::*;
+
+                #bpy_ops
             }
 
             pub fn context() -> Box<dyn types::Context + Send + Sync> {

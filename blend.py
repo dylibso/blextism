@@ -341,8 +341,37 @@ for pointer in POINTERS:
     if pointer['fixed_type'] not in CLASSES:
         pointer['fixed_type'] = 'bpy_struct'
 
+operators = {}
+for opmod_name in dir(bpy.ops):
+    if '__' in opmod_name:
+        continue
 
-print(json.dumps(classes, indent=2))
+    operators[opmod_name] = {}
+    opmod = getattr(bpy.ops, opmod_name)
+    for operator_name in dir(opmod):
+        if '__' in operator_name:
+            continue
+        operator = getattr(opmod, operator_name)
+        rna_type = operator.get_rna_type()
+        if rna_type is None:
+            continue
+
+        parameters = []
+        for prop_name, descriptor in rna_type.properties.items():
+            if prop_name == 'rna_type':
+                continue
+
+            parameters.append(unpack_property_metadata(descriptor, "%s.%s.%s" % (opmod_name, operator_name, prop_name)))
+
+        operators[opmod_name][operator_name] = {
+            "description": rna_type.description,
+            "parameters": parameters
+        }
+
+print(json.dumps({
+    'classes': classes,
+    'operators': operators
+}, indent=2))
 
 # print(dir(bpy.types.Object.bl_rna))
 # print(bpy.data.objects['Cube'])

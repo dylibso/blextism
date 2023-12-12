@@ -3,8 +3,6 @@ use blender_extism_wasm_pdk::bpy;
 
 #[plugin_fn]
 pub fn example() -> FnResult<()> {
-    let objs = bpy::data::objects();
-
     let Some(cube) = bpy::data::objects().get("Cube") else {
         return Ok(())
     };

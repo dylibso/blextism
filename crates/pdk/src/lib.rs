@@ -8,6 +8,7 @@ extern "ExtismHost" {
     fn bpy_setattr(method: &str, args: Json<PyArgs>);
     fn bpy_getattr(method: &str, args: Json<PyArgs>) -> Json<serde_json::Value>;
     fn bpy_callmethod(method: &str, args: Json<PyArgs>) -> Json<serde_json::Value>;
+    fn bpy_operator(opmod: &str, method: &str, args: Json<PyArgs>) -> Json<serde_json::Value>;
 }
 
 pub(crate) fn invoke_bpy_getattr(method: &str, args: PyArgs) -> serde_json::Value {
@@ -25,6 +26,14 @@ pub(crate) fn invoke_bpy_setattr(method: &str, args: PyArgs) {
 pub(crate) fn invoke_bpy_callmethod(method: &str, args: PyArgs) -> serde_json::Value {
     unsafe {
         let result = bpy_callmethod(method, Json(args)).unwrap().into_inner();
+        extism_pdk::info!("{}", serde_json::to_string(&result).unwrap());
+        result
+    }
+}
+
+pub(crate) fn invoke_bpy_operator(opmod: &str, operator: &str, args: PyArgs) -> serde_json::Value {
+    unsafe {
+        let result = bpy_operator(opmod, operator, Json(args)).unwrap().into_inner();
         extism_pdk::info!("{}", serde_json::to_string(&result).unwrap());
         result
     }

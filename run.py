@@ -54,7 +54,9 @@ def _lift(value) -> Any:
 
 def _lower(value) -> Any:
     if isinstance(value, list):
-        print(value)
+        return [*map(_lower, value)]
+
+    if isinstance(value, set):
         return [*map(_lower, value)]
 
     if isinstance(value, tuple):
@@ -74,6 +76,29 @@ def _lower(value) -> Any:
         return {'@ptr': encode_bpy_struct(value), '@type': value.rna_type.identifier}
 
     return value
+
+@host_fn(namespace = "chrisdickinson:blender/bpy")
+def bpy_operator(mod: str, method: str, args: Annotated[dict, Json]) -> Annotated[dict | list, Json]:
+    try:
+        args_lifted = _lift(args)
+        star_args = args_lifted.pop('args', []) or []
+        kwargs = args_lifted.pop('kwargs', {}) or {}
+
+        op_mod = getattr(bpy.ops, mod, None)
+        if op_mod is None:
+            raise InvalidTarget()
+
+        attr = getattr(op_mod, method, None)
+        if attr is None or not callable(attr):
+            raise InvalidTarget()
+
+        return _lower(attr(*star_args, **kwargs))
+    except UnknownPtr:
+        ...
+    except InvalidTarget:
+        ...
+
+    return {}
 
 @host_fn(namespace = "chrisdickinson:blender/bpy")
 def bpy_callmethod(method: str, args: Annotated[dict, Json]) -> Annotated[dict | list, Json]:
