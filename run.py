@@ -92,7 +92,12 @@ def bpy_operator(mod: str, method: str, args: Annotated[dict, Json]) -> Annotate
         if attr is None or not callable(attr):
             raise InvalidTarget()
 
-        return _lower(attr(*star_args, **kwargs))
+        while star_args and star_args[-1] is None:
+            star_args.pop()
+
+        result = attr(*star_args, **kwargs)
+        print('bpy_operator', op_mod, method, attr, result)
+        return _lower(result)
     except UnknownPtr:
         ...
     except InvalidTarget:
@@ -114,7 +119,9 @@ def bpy_callmethod(method: str, args: Annotated[dict, Json]) -> Annotated[dict |
         if attr is None or not callable(attr):
             raise InvalidTarget()
 
-        return _lower(attr(*star_args, **kwargs))
+        result = attr(*star_args, **kwargs)
+        print('bpy_callmethod', target, method, star_args, result)
+        return _lower(result)
     except UnknownPtr:
         ...
     except InvalidTarget:
@@ -134,6 +141,7 @@ def bpy_getattr(attr_name: str, args: Annotated[dict, Json]) -> Annotated[dict |
         if attr is None:
             raise InvalidTarget()
 
+        print('bpy_getattr', target, attr_name, attr)
         return _lower(attr)
     except UnknownPtr:
         ...

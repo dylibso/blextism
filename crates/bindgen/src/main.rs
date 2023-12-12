@@ -585,10 +585,10 @@ fn method_codegen(methods: &HashMap<String, BpyMethod>, defined: &mut HashSet<st
                     }
                 };
 
-                let from_serde_value = if outputs.is_empty() {
-                    quote! { }
+                let (assign_to, from_serde_value) = if outputs.is_empty() {
+                    (quote! { }, quote! { })
                 } else {
-                    outputs[0].as_parsed_intermediate_value()
+                    (quote! { let bpy_output = }, outputs[0].as_parsed_intermediate_value())
                 };
 
                 trait_members.push(quote! {
@@ -599,7 +599,7 @@ fn method_codegen(methods: &HashMap<String, BpyMethod>, defined: &mut HashSet<st
                 impl_members.push(quote! {
                     fn #func_name_ident(&self #params) #return_type {
                         let bpy_input = PyArgs::argv(self, vec![#into_pyargs]);
-                        let bpy_output = invoke_bpy_getattr(#func_name, bpy_input);
+                        #assign_to invoke_bpy_callmethod(#func_name, bpy_input);
                         #from_serde_value
                     }
                 });
