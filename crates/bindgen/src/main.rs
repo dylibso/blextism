@@ -726,7 +726,7 @@ struct Schema {
 
 fn ops_codegen(ops: HashMap<String, HashMap<String, BpyOperator>>) -> TokenStream {
     let mut tkstream = TokenStream::new();
-    let mut extra_items: Vec<TokenStream> = Vec::with_capacity(16);
+    let extra_items: Vec<TokenStream> = Vec::with_capacity(16);
     for (mod_name, items) in ops.into_iter() {
         let mod_name_str = mod_name.as_str().to_snek_case();
         let mod_name_ident = safe_ident(mod_name_str.as_str());
@@ -739,24 +739,20 @@ fn ops_codegen(ops: HashMap<String, HashMap<String, BpyOperator>>) -> TokenStrea
                 !xs.is_output()
             }).collect();
 
-            let params: TokenStream = inputs.iter()
-                .map(|prop| prop.as_method_parameter(&mut extra_items))
-                .reduce(|stream, tk| { quote! { #stream, #tk } })
+            let params_docs = inputs.iter()
+                .map(|prop| {
+                    let item = prop.as_item();
+                    format!("- {}: {}", item.identifier, item.description.clone().unwrap_or_default())
+                })
+                .reduce(|lhs, rhs| format!("{}\n{}", lhs, rhs))
                 .unwrap_or_default();
 
-            let into_pyargs: TokenStream = inputs.iter()
-                .map(|prop| {
-                    let prop = prop.as_item().identifier.as_str().to_snek_case();
-                    let prop = safe_ident(prop.as_str());
-                    quote! { serde_json::to_value(#prop).expect("pyarg must be serializable"), }
-                })
-                .reduce(|stream, tk| { quote! { #stream serde_json::to_value(#tk).expect("pyarg must be serializable"), } })
-                .unwrap_or_default();
+            let description = format!("{}\n{}", descriptor.description, params_docs);
 
             ops.extend(quote! {
-                pub fn #op_name_ident (#params) -> serde_json::Value {
-                    let args = PyArgs::for_operator(vec![#into_pyargs]);
-                    invoke_bpy_operator(#mod_name_str, #op_name_str, args)
+                #[doc = #description]
+                pub fn #op_name_ident (params: impl Into<PyArgs>) -> serde_json::Value {
+                    invoke_bpy_operator(#mod_name_str, #op_name_str, params.into())
                 }
             })
 
@@ -851,71 +847,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         pub mod bpy {
             use serde::{ Deserialize, Serialize };
             use smartstring::alias::String;
-            use crate::{ invoke_bpy_setattr, invoke_bpy_getattr, invoke_bpy_callmethod, invoke_bpy_operator };
+            use crate::{ BpyPtr, PyArgs, invoke_bpy_setattr, invoke_bpy_getattr, invoke_bpy_callmethod, invoke_bpy_operator };
             use std::collections::HashMap;
 
             mod private {
                 pub trait Sealed {}
             }
 
-            #[derive(Serialize, Deserialize, Clone)]
-            pub struct BpyPtr {
-                #[serde(rename = "@ptr")]
-                ptr: i64,
-            }
-
-            impl std::fmt::Debug for BpyPtr {
-                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-                    let args = PyArgs::new(self);
-                    let result: Option<String> = serde_json::from_value(invoke_bpy_callmethod("__repr__", args)).ok().flatten();
-                    f.debug_struct("BpyPtr")
-                        .field("__repr__", &result)
-                        .finish()
-                }
-            }
-
             impl private::Sealed for BpyPtr {}
-
-            #[derive(Serialize, Deserialize, Default)]
-            pub struct PyArgs {
-                #[serde(rename = "self")]
-                target: Option<BpyPtr>,
-                args: Option<Vec<serde_json::Value>>,
-                kwargs: Option<HashMap<String, serde_json::Value>>,
-            }
-
-            impl PyArgs {
-                fn for_operator(args: Vec<serde_json::Value>) -> Self {
-                    Self {
-                        args: Some(args),
-                        ..Default::default()
-                    }
-                }
-
-                fn new(target: &BpyPtr) -> Self {
-                    Self {
-                        target: Some(target.clone()),
-                        ..Default::default()
-                    }
-                }
-
-                fn arg1(target: &BpyPtr, args: impl Serialize) -> Self {
-                    let value = serde_json::to_value(args).expect("pyarg must be serializable");
-                    Self {
-                        target: Some(target.clone()),
-                        args: Some(vec![value]),
-                        ..Default::default()
-                    }
-                }
-
-                fn argv(target: &BpyPtr, args: Vec<serde_json::Value>) -> Self {
-                    Self {
-                        target: Some(target.clone()),
-                        args: Some(args),
-                        ..Default::default()
-                    }
-                }
-            }
 
             pub mod types {
                 use super::*;

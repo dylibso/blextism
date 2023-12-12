@@ -1,7 +1,127 @@
 mod bindings;
 
+use std::{collections::HashMap, str::FromStr};
+
 use extism_pdk::*;
-pub use crate::bindings::{ bpy::PyArgs, bpy };
+use serde::{ Deserialize, Serialize };
+use smartstring::alias::String;
+pub use crate::bindings::bpy;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BpyPtr {
+    #[serde(rename = "@ptr")]
+    ptr: i64,
+}
+
+impl std::fmt::Debug for BpyPtr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let args = PyArgs::new(self);
+        let result: Option<String> = serde_json::from_value(invoke_bpy_callmethod("__repr__", args)).ok().flatten();
+        f.debug_struct("BpyPtr")
+            .field("__repr__", &result)
+            .finish()
+    }
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct PyArgs {
+    #[serde(rename = "self")]
+    target: Option<BpyPtr>,
+    args: Option<Vec<serde_json::Value>>,
+    kwargs: Option<HashMap<String, serde_json::Value>>,
+}
+
+impl PyArgs {
+    fn new(target: &BpyPtr) -> Self {
+        Self {
+            target: Some(target.clone()),
+            ..Default::default()
+        }
+    }
+
+    fn arg1(target: &BpyPtr, args: impl Serialize) -> Self {
+        let value = serde_json::to_value(args).expect("pyarg must be serializable");
+        Self {
+            target: Some(target.clone()),
+            args: Some(vec![value]),
+            ..Default::default()
+        }
+    }
+
+    fn argv(target: &BpyPtr, args: Vec<serde_json::Value>) -> Self {
+        Self {
+            target: Some(target.clone()),
+            args: Some(args),
+            ..Default::default()
+        }
+    }
+}
+
+macro_rules! all_the_tuples {
+    ($name:ident) => {
+        $name!(T1);
+        $name!(T1, T2);
+        $name!(T1, T2, T3);
+        $name!(T1, T2, T3, T4);
+        $name!(T1, T2, T3, T4, T5);
+        $name!(T1, T2, T3, T4, T5, T6);
+        $name!(T1, T2, T3, T4, T5, T6, T7);
+        $name!(T1, T2, T3, T4, T5, T6, T7, T8);
+        $name!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+        $name!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
+        $name!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
+        $name!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12);
+        $name!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13);
+        $name!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14);
+        $name!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15);
+        $name!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16);
+    };
+}
+
+macro_rules! impl_from_for_pyargs {
+    ( $($ty:ident),* $(,)? ) => {
+        #[allow(non_snake_case)]
+        impl<$($ty,)*> From<($((&str, $ty),)*)> for PyArgs
+        where
+            $( $ty: Serialize, )*
+        {
+            fn from(value: ($((&str, $ty),)*)) -> Self {
+                let ($($ty,)*) = value;
+                let mut hm = HashMap::new();
+                $(
+                    hm.insert(String::from_str($ty.0).unwrap(), serde_json::to_value($ty.1).unwrap());
+                )*
+
+                PyArgs {
+                    target: None,
+                    args: None,
+                    kwargs: Some(hm)
+                }
+            }
+        }
+    }
+}
+
+all_the_tuples!(impl_from_for_pyargs);
+
+impl From<()> for PyArgs {
+    fn from(value: ()) -> Self {
+        Default::default()
+    }
+}
+
+impl<S: Into<String>, T: Serialize> From<HashMap<S, T>> for PyArgs {
+    fn from(value: HashMap<S, T>) -> Self {
+        let hm = value.into_iter().map(|(k, v)| {
+            (k.into(), serde_json::to_value(v).unwrap())
+        }).collect();
+        PyArgs {
+            target: None,
+            args: None,
+            kwargs: Some(hm)
+        }
+    }
+}
 
 #[host_fn("chrisdickinson:blender/bpy")]
 extern "ExtismHost" {

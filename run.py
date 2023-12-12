@@ -96,7 +96,6 @@ def bpy_operator(mod: str, method: str, args: Annotated[dict, Json]) -> Annotate
             star_args.pop()
 
         result = attr(*star_args, **kwargs)
-        print('bpy_operator', op_mod, method, attr, result)
         return _lower(result)
     except UnknownPtr:
         ...

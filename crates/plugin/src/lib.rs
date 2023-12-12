@@ -184,22 +184,16 @@ fn update_geo_node_tree(node_tree: &dyn bpy::types::NodeTree) -> Option<()> {
 }
 
 fn create_centerpiece() -> Option<()> {
-    bpy::ops::mesh::primitive_plane_add(
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None
-    );
+    bpy::ops::mesh::primitive_plane_add(());
 
-    bpy::ops::node::new_geometry_nodes_modifier();
+    bpy::ops::node::new_geometry_nodes_modifier(());
     let node_tree = bpy::data::node_groups().get("Geometry Nodes")?;
     update_geo_node_tree(&*node_tree);
 
     // TODO: we need to support kwargs for ops, sadly.
-    // bpy::ops::object::modifier_add(Some("SOLIDIFY"));
+    bpy::ops::object::modifier_add((
+        ("type", "SOLIDIFY"),
+    ));
 
     bpy::context().active_object()?.modifiers()?.get("GeometryNodes")?.set_is_active(Some(true));
     Some(())
@@ -208,34 +202,9 @@ fn create_centerpiece() -> Option<()> {
 fn example_main() {
     scene_setup();
     create_centerpiece();
-    bpy::ops::wm::save_as_mainfile(
-        Some("foo.blend"),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None
-    );
+    bpy::ops::wm::save_as_mainfile((
+        ("filepath", "foo.blend"),
+    ));
 }
 
 #[plugin_fn]
