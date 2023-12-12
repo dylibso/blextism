@@ -47,7 +47,9 @@ def unpack_property_metadata(property_descriptor, clsname):
         "description": property_descriptor.description,
         "type": property_descriptor.type,
         "unit": property_descriptor.unit,
+        "name": property_descriptor.name,
         "subtype": property_descriptor.subtype,
+        "is_argument_optional": property_descriptor.is_argument_optional,
         "is_required": property_descriptor.is_required,
         "is_runtime": property_descriptor.is_runtime,
         "is_output": property_descriptor.is_output,
@@ -171,6 +173,14 @@ def inspect_bpy_type(typ, output):
             continue
         props[prop_name] = unpack_property_metadata(descriptor, typ.__name__)
 
+
+def disambiguate_render_property(output):
+    # RenderEngine defines "render" as both a property (for RenderSettings) AND a
+    # method (".render()"), so we disambiguate here.
+    render_prop = output["properties"].pop("render", None)
+    if render_prop is not None:
+        render_prop["pointer"]["identifier"] = "render_settings"
+        output["properties"]["render_settings"] = render_prop
 
 def add_context_properties(output):
     # Bone: props commented out until we get Bone types included
@@ -303,7 +313,8 @@ def add_context_properties(output):
 
 CLASSES = set()
 EXTRAS = {
-    bpy.types.Context: add_context_properties
+    bpy.types.Context: add_context_properties,
+    bpy.types.RenderEngine: disambiguate_render_property
 }
 
 def inspect_recursive(tree, parent = object, output = []):

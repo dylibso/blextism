@@ -9,14 +9,14 @@ pub fn example() -> FnResult<()> {
         return Ok(())
     };
 
-    if let Some(mut scale) = cube.get_scale() {
+    if let Some(mut scale) = cube.scale() {
         extism_pdk::info!("scale={:?}", scale);
         scale[0] = 6.0;
         cube.set_scale(Some(scale.as_slice()));
     }
 
     eprintln!("hello world! {:?}", bpy::data::objects().items());
-    eprintln!("but wait! {:?}", bpy::context().get_active_object());
+    eprintln!("but wait! {:?}", bpy::context().active_object());
 
     Ok(())
 }

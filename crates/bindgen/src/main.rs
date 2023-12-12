@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use smartstring::alias::String;
 use quote::{quote, format_ident};
 use proc_macro2::TokenStream;
-use heck::ToUpperCamelCase;
+use heck::{ToSnekCase, ToUpperCamelCase};
 
 #[derive(Deserialize, Debug, Serialize)]
 enum BpyType {
@@ -127,12 +127,15 @@ enum BpySubtype {
 #[derive(Deserialize, Debug, Serialize)]
 struct BpyPropertyItem {
     identifier: String,
+    name: Option<String>,
     description: Option<String>,
     #[serde(rename = "type")]
     prop_type: BpyType,
     unit: BpyUnit,
     subtype: BpySubtype,
     is_required: bool,
+    #[serde(default)]
+    is_argument_optional: bool,
     is_runtime: bool,
     is_output: bool,
     is_never_none: bool,
@@ -244,416 +247,156 @@ enum BpyProperty {
     },
 }
 
-#[derive(Deserialize, Debug, Serialize)]
-#[serde(tag = "type", content = "item")]
-enum BpyMethod {
-    #[serde(rename = "rna")]
-    Rna {
-        description: String,
-        use_self: bool,
-        use_self_type: bool,
-        parameters: Vec<BpyProperty>
-    },
-
-    #[serde(rename = "builtin_function_or_method")]
-    Builtin,
-
-    #[serde(rename = "method_descriptor")]
-    MethodDescriptor,
-    #[serde(rename = "_PropertyDeferred")]
-    PropertyDeferred,
-    #[serde(rename = "function")]
-    Function,
-    #[serde(rename = "method")]
-    Method,
+fn safe_ident(inp: &str) -> proc_macro2::Ident {
+    let as_str =  match inp {
+        "fn" => "r#fn",
+        "use" => "r#use",
+        "move" => "r#move",
+        "struct" => "r#struct",
+        "enum" => "r#enum",
+        "self" => "_self",
+        "union" => "r#union",
+        "trait" => "r#trait",
+        "type" => "r#type",
+        "match" => "r#match",
+        "box" => "r#box",
+        "impl" => "r#impl",
+        xs => xs
+    };
+    format_ident!("{}", as_str)
 }
 
-#[derive(Deserialize, Debug, Serialize)]
-struct BpyStructure {
-    name: String,
-    parent: String,
-    properties: HashMap<String, BpyProperty>,
-    methods: HashMap<String, BpyMethod>,
-}
+impl BpyProperty {
+    fn as_item(&self) -> &BpyPropertyItem {
+        match self {
+            BpyProperty::Boolean { item } => item,
+            BpyProperty::BooleanArray { item, .. } => item,
+            BpyProperty::Int { item, .. } => item,
+            BpyProperty::IntArray { item, .. } => item,
+            BpyProperty::Float { item, .. } => item,
+            BpyProperty::FloatArray { item, .. } => item,
+            BpyProperty::String { item, .. } => item,
+            BpyProperty::Enum { item, .. } => item,
+            BpyProperty::Pointer { item, .. } => item,
+            BpyProperty::Collection { item, .. } => item,
+        }
+    }
 
-fn property_codegen(properties: &HashMap<String, BpyProperty>, defined: &mut HashSet<std::string::String>) -> (TokenStream, TokenStream, TokenStream) {
-    let mut impl_members: Vec<TokenStream> = Vec::with_capacity(16);
-    let mut trait_members: Vec<TokenStream> = Vec::with_capacity(16);
-    let mut extra_items: Vec<TokenStream> = Vec::with_capacity(16);
+    fn is_output(&self) -> bool {
+        self.as_item().is_output
+    }
 
-    for (func_name, property) in properties {
-        let func_name = func_name.as_str();
-        match property {
-            BpyProperty::Boolean { item } => {
-                let t = if item.is_never_none {
-                    quote! { bool }
-                } else {
-                    quote! { Option<bool> }
-                };
-                let getter = format_ident!("get_{}", func_name);
-                let setter = format_ident!("set_{}", func_name);
-                let description = item.description.as_ref().map(|xs| xs.as_str());
-                let description = if let Some(desc) = description {
-                    quote! { #[doc = #desc] }
-                } else {
-                    quote! {}
-                };
+    fn as_setter_attr_name(&self) -> proc_macro2::Ident {
+        return format_ident!("set_{}", self.as_item().identifier.as_str());
+    }
 
-                trait_members.push(quote! {
-                    #description
-                    fn #getter(&self) -> #t;
-                    fn #setter(&self, arg: #t);
-                });
+    fn as_getter_attr_name(&self) -> proc_macro2::Ident {
+        safe_ident(self.as_item().identifier.as_str())
+    }
 
-
-                // impl for BpyPtr
-                impl_members.push(quote! {
-                    fn #getter(&self) -> #t {
-                        let args = PyArgs::new(self);
-
-                        let result = invoke_bpy_getattr(#func_name, args);
-                        let result: #t = serde_json::from_value(result).expect("TKTK(improve this msg): expected an boolean value");
-                        result
-                    }
-
-                    fn #setter(&self, arg: #t) {
-                        let args = PyArgs::args(self, arg);
-
-                        invoke_bpy_setattr(#func_name, args);
-                    }
-                });
+    fn as_method_parameter(&self, extra_items: &mut Vec<TokenStream>) -> TokenStream {
+        let tk = match self {
+            BpyProperty::Boolean { item } => quote! { bool },
+            BpyProperty::BooleanArray { item, array } => quote! { &[bool] },
+            BpyProperty::Int { item, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+                quote! { u64 }
+            } else {
+                quote! { i64 }
             },
-
-            BpyProperty::BooleanArray { item, array } => {
-                let t_in = if item.is_never_none {
-                    quote! { &[bool] }
-                } else {
-                    quote! { Option<&[bool]> }
-                };
-                let t_out = if item.is_never_none {
-                    quote! { Vec<bool> }
-                } else {
-                    quote! { Option<Vec<bool>> }
-                };
-                let getter = format_ident!("get_{}", func_name);
-                let setter = format_ident!("set_{}", func_name);
-                let description = item.description.as_ref().map(|xs| xs.as_str());
-                let description = if let Some(desc) = description {
-                    quote! { #[doc = #desc] }
-                } else {
-                    quote! {}
-                };
-                trait_members.push(quote! {
-                    #description
-                    fn #getter(&self) -> #t_out;
-                    fn #setter(&self, arg: #t_in);
-                });
-
-                impl_members.push(quote! {
-                    fn #getter(&self) -> #t_out {
-                        let args = PyArgs::new(self);
-
-                        let result = invoke_bpy_getattr(#func_name, args);
-                        let result: #t_out = serde_json::from_value(result).expect("TKTK(improve this msg): expected an boolean value");
-                        result
-                    }
-
-                    fn #setter(&self, arg: #t_in) {
-                        // TKTK: TODO: extend arg if it's the wrong size.
-                        let args = PyArgs::args(self, arg);
-
-                        invoke_bpy_setattr(#func_name, args);
-                    }
-                });
+            BpyProperty::IntArray { item, array, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+                quote! { Vec<u64> }
+            } else {
+                quote! { Vec<i64> }
             },
-
-            BpyProperty::Int { item, number } => {
-                let base_type = if number.hard_min == number.soft_min && number.soft_min == 0 {
-                    quote! { u64 }
-                } else {
-                    quote! { i64 }
-                };
-                let t = if item.is_never_none {
-                    quote! { #base_type }
-                } else {
-                    quote! { Option<#base_type> }
-                };
-                let getter = format_ident!("get_{}", func_name);
-                let setter = format_ident!("set_{}", func_name);
-                let description = item.description.as_ref().map(|xs| xs.as_str());
-                let description = if let Some(desc) = description {
-                    quote! { #[doc = #desc] }
-                } else {
-                    quote! {}
-                };
-                trait_members.push(quote! {
-                    #description
-                    fn #getter(&self) -> #t;
-                    fn #setter(&self, arg: #t);
-                });
-
-                // impl for BpyPtr
-                impl_members.push(quote! {
-                    fn #getter(&self) -> #t {
-                        let args = PyArgs::new(self);
-
-                        let result = invoke_bpy_getattr(#func_name, args);
-                        let result: #t = serde_json::from_value(result).expect("TKTK(improve this msg): expected an integer value");
-                        result
-                    }
-
-                    fn #setter(&self, arg: #t) {
-                        let args = PyArgs::args(self, arg);
-
-                        invoke_bpy_setattr(#func_name, args);
-                    }
-                });
-            },
-
-            BpyProperty::IntArray { item, array, number } => {
-                let base_type = if number.hard_min == number.soft_min && number.soft_min == 0 {
-                    quote! { u64 }
-                } else {
-                    quote! { i64 }
-                };
-
-                let t_in = if item.is_never_none {
-                    quote! { &[#base_type] }
-                } else {
-                    quote! { Option<&[#base_type]> }
-                };
-                let t_out = if item.is_never_none {
-                    quote! { Vec<#base_type> }
-                } else {
-                    quote! { Option<Vec<#base_type>> }
-                };
-                let getter = format_ident!("get_{}", func_name);
-                let setter = format_ident!("set_{}", func_name);
-                let description = item.description.as_ref().map(|xs| xs.as_str());
-                let description = if let Some(desc) = description {
-                    quote! { #[doc = #desc] }
-                } else {
-                    quote! {}
-                };
-                trait_members.push(quote! {
-                    #description
-                    fn #getter(&self) -> #t_out;
-                    fn #setter(&self, arg: #t_in);
-                });
-
-                // impl for BpyPtr
-                impl_members.push(quote! {
-                    fn #getter(&self) -> #t_out {
-                        let args = PyArgs::new(self);
-
-                        let result = invoke_bpy_getattr(#func_name, args);
-                        let result: #t_out = serde_json::from_value(result).expect("TKTK(improve this msg): expected a list of integer values");
-                        result
-                    }
-
-                    fn #setter(&self, arg: #t_in) {
-                        // TKTK: TODO: extend arg if it's the wrong size.
-                        let args = PyArgs::args(self, arg);
-
-                        invoke_bpy_setattr(#func_name, args);
-                    }
-                });
-            },
-
-            BpyProperty::Float { item, number } => {
-                let t = if item.is_never_none {
-                    quote! { f64 }
-                } else {
-                    quote! { Option<f64> }
-                };
-                let getter = format_ident!("get_{}", func_name);
-                let setter = format_ident!("set_{}", func_name);
-                let description = item.description.as_ref().map(|xs| xs.as_str());
-                let description = if let Some(desc) = description {
-                    quote! { #[doc = #desc] }
-                } else {
-                    quote! {}
-                };
-                trait_members.push(quote! {
-                    #description
-                    fn #getter(&self) -> #t;
-                    fn #setter(&self, arg: #t);
-                });
-
-                // impl for BpyPtr
-                impl_members.push(quote! {
-                    fn #getter(&self) -> #t {
-                        let args = PyArgs::new(self);
-
-                        let result = invoke_bpy_getattr(#func_name, args);
-                        let result: #t = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
-                        result
-                    }
-
-                    fn #setter(&self, arg: #t) {
-                        let args = PyArgs::args(self, arg);
-
-                        invoke_bpy_setattr(#func_name, args);
-                    }
-                });
-            },
-
-            BpyProperty::FloatArray { item, array, number } => {
-                let t_in = if item.is_never_none {
-                    quote! { &[f64] }
-                } else {
-                    quote! { Option<&[f64]> }
-                };
-                let t_out = if item.is_never_none {
-                    quote! { Vec<f64> }
-                } else {
-                    quote! { Option<Vec<f64>> }
-                };
-                let getter = format_ident!("get_{}", func_name);
-                let setter = format_ident!("set_{}", func_name);
-                let description = item.description.as_ref().map(|xs| xs.as_str());
-                let description = if let Some(desc) = description {
-                    quote! { #[doc = #desc] }
-                } else {
-                    quote! {}
-                };
-                trait_members.push(quote! {
-                    #description
-                    fn #getter(&self) -> #t_out;
-                    fn #setter(&self, arg: #t_in);
-                });
-
-                // impl for BpyPtr
-                impl_members.push(quote! {
-                    fn #getter(&self) -> #t_out {
-                        let args = PyArgs::new(self);
-
-                        let result = invoke_bpy_getattr(#func_name, args);
-                        let result: #t_out = serde_json::from_value(result).expect("TKTK(improve this msg): expected a list of floating-point values");
-                        result
-                    }
-
-                    fn #setter(&self, arg: #t_in) {
-                        // TKTK: TODO: extend arg if it's the wrong size.
-                        let args = PyArgs::args(self, arg);
-
-                        invoke_bpy_setattr(#func_name, args);
-                    }
-                });
-            },
-
-            BpyProperty::String { item, length_max, default } => {
-                let t_in = if item.is_never_none {
-                    quote! { &str }
-                } else {
-                    quote! { Option<&str> }
-                };
-                let t_out = if item.is_never_none {
-                    quote! { String }
-                } else {
-                    quote! { Option<String> }
-                };
-                let getter = format_ident!("get_{}", func_name);
-                let setter = format_ident!("set_{}", func_name);
-                let description = item.description.as_ref().map(|xs| xs.as_str());
-                let description = if let Some(desc) = description {
-                    quote! { #[doc = #desc] }
-                } else {
-                    quote! {}
-                };
-                trait_members.push(quote! {
-                    #description
-                    fn #getter(&self) -> #t_out;
-                    fn #setter(&self, arg: #t_in);
-                });
-
-                // impl for BpyPtr
-                impl_members.push(quote! {
-                    fn #getter(&self) -> #t_out {
-                        let args = PyArgs::new(self);
-
-                        let result = invoke_bpy_getattr(#func_name, args);
-                        let result: #t_out = serde_json::from_value(result).expect("TKTK(improve this msg): expected a string");
-                        result
-                    }
-
-                    fn #setter(&self, arg: #t_in) {
-                        let args = PyArgs::args(self, arg);
-
-                        invoke_bpy_setattr(#func_name, args);
-                    }
-                });
-            },
-
+            BpyProperty::Float { item, number } => quote! { f64 },
+            BpyProperty::FloatArray { item, array, number } => quote! { &[f64] },
+            BpyProperty::String { item, length_max, default } => quote! { &str },
             BpyProperty::Enum { item, items } => {
-                // TODO!
+                // for now, enums are strings.
+                quote! { &str }
             },
 
             BpyProperty::Pointer { item, fixed_type } => {
-                let t = if item.is_never_none {
-                    quote! { BpyPtr }
-                } else {
-                    quote! { Option<BpyPtr> }
-                };
+                quote! { BpyPtr }
+            },
+            BpyProperty::Collection { item, fixed_type, collection } => {
+                quote! { BpyPtr }
+            },
+        };
 
-                let target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
-                let out_type = if item.is_never_none {
-                    quote! { Box<dyn #target_type + Send + Sync> }
-                } else {
-                    quote! { Option<Box<dyn #target_type + Send + Sync>> }
-                };
+        let argname = self.as_item().identifier.as_str().to_snek_case();
+        let argname = safe_ident(argname.as_str());
 
-                let getter = format_ident!("get_{}", func_name);
-                let setter = format_ident!("set_{}", func_name);
-                let description = item.description.as_ref().map(|xs| xs.as_str());
-                let description = if let Some(desc) = description {
-                    quote! { #[doc = #desc] }
-                } else {
-                    quote! {}
-                };
-                trait_members.push(quote! {
-                    #description
-                    fn #getter(&self) -> #out_type;
-                    fn #setter(&self, arg: #t);
-                });
+        if self.as_item().is_required {
+            quote! { #argname: #tk }
+        } else {
+            quote! { #argname: Option<#tk> }
+        }
+    }
 
-                let unwrap = if item.is_never_none {
-                    quote! {
-                        let result: BpyPtr = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
-                        let result = Box::new(result) as Box<dyn #target_type + Send + Sync>;
-                    }
-                } else {
-                    quote! {
-                        let result: Option<BpyPtr> = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
-
-                        let result = match result {
-                            Some(xs) => Some(Box::new(xs) as Box<dyn #target_type + Send + Sync>),
-                            None => None,
-                        };
-                    }
-                };
-
-                // impl for BpyPtr
-                impl_members.push(quote! {
-                    fn #getter(&self) -> #out_type {
-                        let args = PyArgs::new(self);
-
-                        let result = invoke_bpy_getattr(#func_name, args);
-                        #unwrap
-                        result
-                    }
-
-                    fn #setter(&self, arg: #t) {
-                        let args = PyArgs::args(self, arg);
-
-                        invoke_bpy_setattr(#func_name, args);
-                    }
-                });
+    fn as_setter_parameter_type(&self, extra_items: &mut Vec<TokenStream>) -> TokenStream {
+        let tk = match self {
+            BpyProperty::Boolean { item } => quote! { bool },
+            BpyProperty::BooleanArray { item, array } => quote! { &[bool] },
+            BpyProperty::Int { item, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+                quote! { u64 }
+            } else {
+                quote! { i64 }
+            },
+            BpyProperty::IntArray { item, array, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+                quote! { Vec<u64> }
+            } else {
+                quote! { Vec<i64> }
+            },
+            BpyProperty::Float { item, number } => quote! { f64 },
+            BpyProperty::FloatArray { item, array, number } => quote! { &[f64] },
+            BpyProperty::String { item, length_max, default } => quote! { &str },
+            BpyProperty::Enum { item, items } => {
+                // for now, enums are strings.
+                quote! { &str }
             },
 
-            // TODO: BpyProperty::Collection isn't JUST a vec
-            // it should return a Box<dyn #collection>; though
-            // it might need to "mix in" a `bpy_prop_collection` type?
+            BpyProperty::Pointer { item, fixed_type } => {
+                quote! { BpyPtr }
+            },
+            BpyProperty::Collection { item, fixed_type, collection } => {
+                quote! { BpyPtr }
+            },
+        };
+
+        if self.as_item().is_required {
+            tk
+        } else {
+            quote! { Option<#tk> }
+        }
+    }
+
+    fn as_return_type(&self, extra_items: &mut Vec<TokenStream>, defined: &mut HashSet<std::string::String>) -> TokenStream {
+        let tk = match self {
+            BpyProperty::Boolean { item } => quote! { bool },
+            BpyProperty::BooleanArray { item, array } => quote! { Vec<bool> },
+            BpyProperty::Int { item, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+                quote! { u64 }
+            } else {
+                quote! { i64 }
+            },
+            BpyProperty::IntArray { item, array, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+                quote! { Vec<u64> }
+            } else {
+                quote! { Vec<i64> }
+            },
+            BpyProperty::Float { item, number } => quote! { f64 },
+            BpyProperty::FloatArray { item, array, number } => quote! { Vec<f64> },
+            BpyProperty::String { item, length_max, default } => quote! { String },
+            BpyProperty::Enum { item, items } => {
+                // for now, enums are strings.
+                quote! { String }
+            },
+
+            BpyProperty::Pointer { item, fixed_type } => {
+                let ident = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
+                quote! { Box<dyn #ident + Send + Sync> }
+            },
             BpyProperty::Collection { item, fixed_type, collection } => {
                 let collection_constraint = collection.as_ref().map(|c| {
                     let ident = format_ident!("{}", c.as_str().to_upper_camel_case());
@@ -698,53 +441,227 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>, defined: &mut Has
                     });
                 }
 
-                let out_type = if item.is_never_none {
-                    quote! { Box<dyn #return_type_ident + Send + Sync> }
-                } else {
-                    quote! { Option<Box<dyn #return_type_ident + Send + Sync>> }
-                };
+                quote! { Box<dyn #return_type_ident + Send + Sync> }
+            },
+        };
 
-                let getter = format_ident!("get_{}", func_name);
-                let description = item.description.as_ref().map(|xs| xs.as_str());
-                let description = if let Some(desc) = description {
-                    quote! { #[doc = #desc] }
-                } else {
-                    quote! {}
-                };
-                trait_members.push(quote! {
-                    #description
-                    fn #getter(&self) -> #out_type;
-                });
+        if self.as_item().is_never_none {
+            tk
+        } else {
+            quote! { Option<#tk> }
+        }
+    }
 
-                let unwrap = if item.is_never_none {
+    fn as_parsed_intermediate_value(&self) -> TokenStream {
+        match self {
+            BpyProperty::Boolean { .. } |
+            BpyProperty::Int { .. } |
+            BpyProperty::Float { .. } |
+            BpyProperty::String { .. } |
+            BpyProperty::BooleanArray { .. } |
+            BpyProperty::IntArray { .. } |
+            BpyProperty::FloatArray { .. } => {
+                quote! {
+                    serde_json::from_value(bpy_output).expect("expected to deserialize appropriately")
+                }
+            },
+            BpyProperty::Pointer { item, fixed_type } => {
+                let target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
+                if item.is_never_none {
                     quote! {
-                        let result: BpyPtr = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
-                        let result = Box::new(result) as Box<dyn #return_type_ident + Send + Sync>;
+                        let result: BpyPtr = serde_json::from_value(bpy_output).expect("TKTK(improve this msg): expected an floating-point value");
+                        Box::new(result) as Box<dyn #target_type + Send + Sync>
                     }
                 } else {
                     quote! {
-                        let result: Option<BpyPtr> = serde_json::from_value(result).expect("TKTK(improve this msg): expected an floating-point value");
-
-                        let result = match result {
-                            Some(xs) => Some(Box::new(xs) as Box<dyn #return_type_ident + Send + Sync>),
+                        let result: Option<BpyPtr> = serde_json::from_value(bpy_output).expect("TKTK(improve this msg): expected an floating-point value");
+                        match result {
+                            Some(xs) => Some(Box::new(xs) as Box<dyn #target_type + Send + Sync>),
                             None => None,
-                        };
+                        }
                     }
-                };
-                // impl for BpyPtr
-                impl_members.push(quote! {
-                    fn #getter(&self) -> #out_type {
-                        let args = PyArgs::new(self);
-
-                        let result = invoke_bpy_getattr(#func_name, args);
-                        #unwrap
-                        result
-                    }
-                });
+                }
             },
 
-            _ => {}
+            BpyProperty::Collection { item, fixed_type, collection } => {
+                let target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
+                let return_type_str = format!("BpyPropCollection_{}", collection.as_ref().unwrap_or(fixed_type)).to_upper_camel_case();
+                let return_type_ident = format_ident!("{}", return_type_str);
+
+                if item.is_never_none {
+                    quote! {
+                        let result: BpyPtr = serde_json::from_value(bpy_output).expect("TKTK(improve this msg): expected an floating-point value");
+                        Box::new(result) as Box<dyn #return_type_ident + Send + Sync>
+                    }
+                } else {
+                    quote! {
+                        let result: Option<BpyPtr> = serde_json::from_value(bpy_output).expect("TKTK(improve this msg): expected an floating-point value");
+
+                        match result {
+                            Some(xs) => Some(Box::new(xs) as Box<dyn #return_type_ident + Send + Sync>),
+                            None => None,
+                        }
+                    }
+                }
+            },
+
+            BpyProperty::Enum { item, items } => {
+                quote! { serde_json::from_value(bpy_output).expect("expected to deserialize appropriately") }
+            },
         }
+    }
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+#[serde(tag = "type", content = "item")]
+enum BpyMethod {
+    #[serde(rename = "rna")]
+    Rna {
+        description: String,
+        use_self: bool,
+        use_self_type: bool,
+        parameters: Vec<BpyProperty>
+    },
+
+    #[serde(rename = "builtin_function_or_method")]
+    Builtin,
+
+    #[serde(rename = "method_descriptor")]
+    MethodDescriptor,
+    #[serde(rename = "_PropertyDeferred")]
+    PropertyDeferred,
+    #[serde(rename = "function")]
+    Function,
+    #[serde(rename = "method")]
+    Method,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+struct BpyStructure {
+    name: String,
+    parent: String,
+    properties: HashMap<String, BpyProperty>,
+    methods: HashMap<String, BpyMethod>,
+}
+
+fn method_codegen(methods: &HashMap<String, BpyMethod>, defined: &mut HashSet<std::string::String>) -> (TokenStream, TokenStream, TokenStream) {
+
+    let mut impl_members: Vec<TokenStream> = Vec::with_capacity(16);
+    let mut trait_members: Vec<TokenStream> = Vec::with_capacity(16);
+    let mut extra_items: Vec<TokenStream> = Vec::with_capacity(16);
+
+    for (func_name, method) in methods {
+        match method {
+            BpyMethod::Rna { description, use_self, use_self_type, parameters } => {
+                let func_name = func_name.as_str().to_snek_case();
+                let func_name_ident = safe_ident(func_name.as_str());
+
+                let description = description.as_str();
+                let (outputs, inputs): (Vec<_>, Vec<_>) = parameters.iter().partition(|xs| {
+                    xs.is_output()
+                });
+
+                let params: TokenStream = inputs.iter()
+                    .map(|prop| prop.as_method_parameter(&mut extra_items))
+                    .fold(TokenStream::new(), |stream, tk| { quote! { #stream, #tk } });
+
+                let into_pyargs: TokenStream = inputs.iter()
+                    .map(|prop| {
+                        let prop = prop.as_item().identifier.as_str().to_snek_case();
+                        safe_ident(prop.as_str())
+                    })
+                    .fold(TokenStream::new(), |stream, tk| { quote! { #stream serde_json::to_value(#tk).expect("pyarg must be serializable"), } });
+
+                if outputs.len() > 1 {
+                    continue
+                }
+
+                let return_type = if outputs.is_empty() {
+                    quote! { }
+                } else {
+                    let output = outputs[0].as_return_type(&mut extra_items, defined);
+                    quote! {
+                        -> #output
+                    }
+                };
+
+                let from_serde_value = if outputs.is_empty() {
+                    quote! { }
+                } else {
+                    outputs[0].as_parsed_intermediate_value()
+                };
+
+                trait_members.push(quote! {
+                    #[doc = #description]
+                    fn #func_name_ident(&self #params) #return_type;
+                });
+
+                impl_members.push(quote! {
+                    fn #func_name_ident(&self #params) #return_type {
+                        let bpy_input = PyArgs::argv(self, vec![#into_pyargs]);
+                        let bpy_output = invoke_bpy_getattr(#func_name, bpy_input);
+                        #from_serde_value
+                    }
+                });
+
+                if let Err(e) = syn::parse2::<syn::File>(impl_members.last().unwrap().clone()) {
+                    eprintln!("{}", impl_members.last().unwrap());
+                }
+            },
+            BpyMethod::Builtin => {},
+            BpyMethod::MethodDescriptor => {},
+            BpyMethod::PropertyDeferred => {},
+            BpyMethod::Function => {},
+            BpyMethod::Method => {},
+        }
+    }
+
+    (extra_items.into_iter().collect(), trait_members.into_iter().collect(), impl_members.into_iter().collect())
+}
+
+fn property_codegen(properties: &HashMap<String, BpyProperty>, defined: &mut HashSet<std::string::String>) -> (TokenStream, TokenStream, TokenStream) {
+    let mut impl_members: Vec<TokenStream> = Vec::with_capacity(16);
+    let mut trait_members: Vec<TokenStream> = Vec::with_capacity(16);
+    let mut extra_items: Vec<TokenStream> = Vec::with_capacity(16);
+
+    for (func_name, property) in properties {
+        let func_name = func_name.as_str();
+
+        let getter = property.as_getter_attr_name();
+        let setter = property.as_setter_attr_name();
+        let setter_param = property.as_setter_parameter_type(&mut extra_items);
+        let return_type = property.as_return_type(&mut extra_items, defined);
+
+        let description = property.as_item().description.as_ref().map(|xs| xs.as_str());
+        let description = if let Some(desc) = description {
+            quote! { #[doc = #desc] }
+        } else {
+            quote! {}
+        };
+
+        let parser = property.as_parsed_intermediate_value();
+
+        trait_members.push(quote! {
+            #description
+            fn #getter(&self) -> #return_type;
+            fn #setter(&self, arg: #setter_param);
+        });
+
+        // impl for BpyPtr
+        impl_members.push(quote! {
+            fn #getter(&self) -> #return_type {
+                let args = PyArgs::new(self);
+
+                let bpy_output = invoke_bpy_getattr(#func_name, args);
+                #parser
+            }
+
+            fn #setter(&self, arg: #setter_param) {
+                let args = PyArgs::arg1(self, arg);
+
+                invoke_bpy_setattr(#func_name, args);
+            }
+        });
     }
 
     (extra_items.into_iter().collect(), trait_members.into_iter().collect(), impl_members.into_iter().collect())
@@ -760,10 +677,16 @@ fn structure_to_syntax(structure: BpyStructure, defined: &mut HashSet<std::strin
     let name = format_ident!("{}", structure_name);
     let parent = format_ident!("{}", structure.parent.as_str().to_upper_camel_case());
 
-    let (extra_items, mut trait_members, mut impl_members) = property_codegen(&structure.properties, defined);
+    let (mut extra_items, mut trait_members, mut impl_members) = property_codegen(&structure.properties, defined);
+    let (e, t, i) = method_codegen(&structure.methods, defined);
+
+    extra_items.extend(e);
+    trait_members.extend(t);
+    impl_members.extend(i);
 
     if structure_name.as_str() == "BpyStruct" {
         trait_members.extend(quote! {
+            /// Unbox a dynamic pointer. Useful for re-casting to a different trait object.
             fn to_bpy_ptr(&self) -> BpyPtr;
         });
 
@@ -912,11 +835,19 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                 }
 
-                fn args(target: &BpyPtr, args: impl Serialize) -> Self {
+                fn arg1(target: &BpyPtr, args: impl Serialize) -> Self {
                     let value = serde_json::to_value(args).expect("pyarg must be serializable");
                     Self {
                         target: Some(target.clone()),
                         args: Some(vec![value]),
+                        ..Default::default()
+                    }
+                }
+
+                fn argv(target: &BpyPtr, args: Vec<serde_json::Value>) -> Self {
+                    Self {
+                        target: Some(target.clone()),
+                        args: Some(args),
                         ..Default::default()
                     }
                 }
@@ -925,7 +856,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             pub mod types {
                 use super::*;
                 fn get(ptr: &BpyPtr, key: &str) -> Option<BpyPtr> {
-                    let args = PyArgs::args(ptr, key);
+                    let args = PyArgs::arg1(ptr, key);
                     let result = invoke_bpy_callmethod("get", args);
                     let result: Option<BpyPtr> = serde_json::from_value(result).expect("TKTK");
                     result
