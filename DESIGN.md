@@ -57,4 +57,8 @@ trait
 - ops
 
 
+---
+
+paremeter: `is_required` indicates whether or not an argument _must_ be a kwarg
+
 

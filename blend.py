@@ -311,8 +311,65 @@ def add_context_properties(output):
             }
         }
 
+def add_keyframe_methods(output):
+    create_prop = lambda name, description, typ, required, **kwargs: {
+        "identifier": name,
+        "description": description,
+        "type": typ, 
+        "unit": "NONE",
+        "name": name,
+        "subtype": "NONE",
+        "is_argument_optional": not required,
+        "is_required": required,
+        "is_runtime": False,
+        "is_output": False,
+        "is_never_none": False,
+        **kwargs
+    }
+
+    output["methods"]["keyframe_insert"] = {
+        'type': 'rna',
+        'item': {
+            'description': 'Insert a keyframe on the property given, adding fcurves and animation data when necessary.',
+            'use_self': True,
+            'use_self_type': False,
+            'parameters': [
+                {"string": create_prop("data_path", "path to the property to key, analogous to the fcurve’s data path.", "STRING", True, **{
+                    "length_max": 0,
+                    "default": ""
+                })},
+
+                {"int": create_prop("index", "array index of the property to key. Defaults to -1 which will key all indices or a single channel if the property is not an array.", "INT", False, **{
+                    "hard_min": -2147483648,
+                    "hard_max": 2147483647,
+                    "soft_min": -2147483648,
+                    "soft_max": 2147483647,
+                    "default": -1
+                })},
+
+                {"float": create_prop("frame", "The frame on which the keyframe is inserted, defaulting to the current frame.", "FLOAT", False, **{
+                    "hard_min": -2147483648,
+                    "hard_max": 2147483647,
+                    "soft_min": -2147483648,
+                    "soft_max": 2147483647,
+                })},
+
+                {"string": create_prop("group", "The name of the group the F-Curve should be added to if it doesn’t exist yet.", "STRING", False, **{
+                    "length_max": 0,
+                    "default": ""
+                })},
+
+                {"string": create_prop("options", "Optional set of flags", "STRING", False, **{
+                    "length_max": 0,
+                    "default": ""
+                })},
+            ]
+        }
+    }
+
 CLASSES = set()
 EXTRAS = {
+    bpy.types.bpy_struct: add_keyframe_methods,
     bpy.types.Context: add_context_properties,
     bpy.types.RenderEngine: disambiguate_render_property
 }

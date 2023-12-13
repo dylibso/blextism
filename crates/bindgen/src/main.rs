@@ -287,39 +287,39 @@ impl BpyProperty {
     }
 
     fn as_setter_attr_name(&self) -> proc_macro2::Ident {
-        return format_ident!("set_{}", self.as_item().identifier.as_str());
+        format_ident!("set_{}", self.as_item().identifier.as_str())
     }
 
     fn as_getter_attr_name(&self) -> proc_macro2::Ident {
         safe_ident(self.as_item().identifier.as_str())
     }
 
-    fn as_method_parameter(&self, extra_items: &mut Vec<TokenStream>) -> TokenStream {
+    fn as_method_parameter(&self, _extra_items: &mut Vec<TokenStream>) -> TokenStream {
         let tk = match self {
-            BpyProperty::Boolean { item } => quote! { bool },
-            BpyProperty::BooleanArray { item, array } => quote! { &[bool] },
-            BpyProperty::Int { item, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+            BpyProperty::Boolean { item: _ } => quote! { bool },
+            BpyProperty::BooleanArray { item: _, array: _ } => quote! { &[bool] },
+            BpyProperty::Int { item: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
                 quote! { u64 }
             } else {
                 quote! { i64 }
             },
-            BpyProperty::IntArray { item, array, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+            BpyProperty::IntArray { item: _, array: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
                 quote! { Vec<u64> }
             } else {
                 quote! { Vec<i64> }
             },
-            BpyProperty::Float { item, number } => quote! { f64 },
-            BpyProperty::FloatArray { item, array, number } => quote! { &[f64] },
-            BpyProperty::String { item, length_max, default } => quote! { &str },
-            BpyProperty::Enum { item, items } => {
+            BpyProperty::Float { item: _, number: _ } => quote! { f64 },
+            BpyProperty::FloatArray { item: _, array: _, number: _ } => quote! { &[f64] },
+            BpyProperty::String { item: _, length_max: _, default: _ } => quote! { &str },
+            BpyProperty::Enum { item: _, items: _ } => {
                 // for now, enums are strings.
                 quote! { &str }
             },
 
-            BpyProperty::Pointer { item, fixed_type } => {
+            BpyProperty::Pointer { item: _, fixed_type: _ } => {
                 quote! { BpyPtr }
             },
-            BpyProperty::Collection { item, fixed_type, collection } => {
+            BpyProperty::Collection { item: _, fixed_type: _, collection: _ } => {
                 quote! { BpyPtr }
             },
         };
@@ -334,32 +334,32 @@ impl BpyProperty {
         }
     }
 
-    fn as_setter_parameter_type(&self, extra_items: &mut Vec<TokenStream>) -> TokenStream {
+    fn as_setter_parameter_type(&self, _extra_items: &mut Vec<TokenStream>) -> TokenStream {
         let tk = match self {
-            BpyProperty::Boolean { item } => quote! { bool },
-            BpyProperty::BooleanArray { item, array } => quote! { &[bool] },
-            BpyProperty::Int { item, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+            BpyProperty::Boolean { item: _ } => quote! { bool },
+            BpyProperty::BooleanArray { item: _, array: _ } => quote! { &[bool] },
+            BpyProperty::Int { item: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
                 quote! { u64 }
             } else {
                 quote! { i64 }
             },
-            BpyProperty::IntArray { item, array, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+            BpyProperty::IntArray { item: _, array: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
                 quote! { Vec<u64> }
             } else {
                 quote! { Vec<i64> }
             },
-            BpyProperty::Float { item, number } => quote! { f64 },
-            BpyProperty::FloatArray { item, array, number } => quote! { &[f64] },
-            BpyProperty::String { item, length_max, default } => quote! { &str },
-            BpyProperty::Enum { item, items } => {
+            BpyProperty::Float { item: _, number: _ } => quote! { f64 },
+            BpyProperty::FloatArray { item: _, array: _, number: _ } => quote! { &[f64] },
+            BpyProperty::String { item: _, length_max: _, default: _ } => quote! { &str },
+            BpyProperty::Enum { item: _, items: _ } => {
                 // for now, enums are strings.
                 quote! { &str }
             },
 
-            BpyProperty::Pointer { item, fixed_type } => {
+            BpyProperty::Pointer { item: _, fixed_type: _ } => {
                 quote! { BpyPtr }
             },
-            BpyProperty::Collection { item, fixed_type, collection } => {
+            BpyProperty::Collection { item: _, fixed_type: _, collection: _ } => {
                 quote! { BpyPtr }
             },
         };
@@ -373,31 +373,31 @@ impl BpyProperty {
 
     fn as_return_type(&self, extra_items: &mut Vec<TokenStream>, defined: &mut HashSet<std::string::String>) -> TokenStream {
         let tk = match self {
-            BpyProperty::Boolean { item } => quote! { bool },
-            BpyProperty::BooleanArray { item, array } => quote! { Vec<bool> },
-            BpyProperty::Int { item, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+            BpyProperty::Boolean { item: _ } => quote! { bool },
+            BpyProperty::BooleanArray { item: _, array: _ } => quote! { Vec<bool> },
+            BpyProperty::Int { item: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
                 quote! { u64 }
             } else {
                 quote! { i64 }
             },
-            BpyProperty::IntArray { item, array, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
+            BpyProperty::IntArray { item: _, array: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
                 quote! { Vec<u64> }
             } else {
                 quote! { Vec<i64> }
             },
-            BpyProperty::Float { item, number } => quote! { f64 },
-            BpyProperty::FloatArray { item, array, number } => quote! { Vec<f64> },
-            BpyProperty::String { item, length_max, default } => quote! { String },
-            BpyProperty::Enum { item, items } => {
+            BpyProperty::Float { item: _, number: _ } => quote! { f64 },
+            BpyProperty::FloatArray { item: _, array: _, number: _ } => quote! { Vec<f64> },
+            BpyProperty::String { item: _, length_max: _, default: _ } => quote! { String },
+            BpyProperty::Enum { item: _, items: _ } => {
                 // for now, enums are strings.
                 quote! { String }
             },
 
-            BpyProperty::Pointer { item, fixed_type } => {
+            BpyProperty::Pointer { item: _, fixed_type } => {
                 let ident = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
                 quote! { Box<dyn #ident + Send + Sync> }
             },
-            BpyProperty::Collection { item, fixed_type, collection } => {
+            BpyProperty::Collection { item: _, fixed_type, collection } => {
                 let collection_constraint = collection.as_ref().map(|c| {
                     let ident = format_ident!("{}", c.as_str().to_upper_camel_case());
                     quote! { : #ident + BpyPropCollection }
@@ -484,7 +484,7 @@ impl BpyProperty {
             },
 
             BpyProperty::Collection { item, fixed_type, collection } => {
-                let target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
+                let _target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
                 let return_type_str = format!("BpyPropCollection_{}", collection.as_ref().unwrap_or(fixed_type)).to_upper_camel_case();
                 let return_type_ident = format_ident!("{}", return_type_str);
 
@@ -505,7 +505,7 @@ impl BpyProperty {
                 }
             },
 
-            BpyProperty::Enum { item, items } => {
+            BpyProperty::Enum { item: _, items: _ } => {
                 quote! { serde_json::from_value(bpy_output).expect("expected to deserialize appropriately") }
             },
         }
@@ -552,7 +552,7 @@ fn method_codegen(methods: &HashMap<String, BpyMethod>, defined: &mut HashSet<st
 
     for (func_name, method) in methods {
         match method {
-            BpyMethod::Rna { description, use_self, use_self_type, parameters } => {
+            BpyMethod::Rna { description, use_self: _, use_self_type: _, parameters } => {
                 let func_name = func_name.as_str().to_snek_case();
                 let func_name_ident = safe_ident(func_name.as_str());
 
@@ -726,7 +726,7 @@ struct Schema {
 
 fn ops_codegen(ops: HashMap<String, HashMap<String, BpyOperator>>) -> TokenStream {
     let mut tkstream = TokenStream::new();
-    let extra_items: Vec<TokenStream> = Vec::with_capacity(16);
+    let _extra_items: Vec<TokenStream> = Vec::with_capacity(16);
     for (mod_name, items) in ops.into_iter() {
         let mod_name_str = mod_name.as_str().to_snek_case();
         let mod_name_ident = safe_ident(mod_name_str.as_str());

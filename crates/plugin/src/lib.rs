@@ -1,5 +1,5 @@
 use extism_pdk::*;
-use blender_extism_wasm_pdk::bpy;
+use blender_extism_wasm_pdk::bpy::{self, types::NodeSocket};
 
 fn scene_setup() {
 }
@@ -16,15 +16,54 @@ fn link_nodes(
     Some(())
 }
 
+fn create_random_bool_value_node(
+    node_tree: &dyn bpy::types::NodeTree,
+    node_x_location: i32,
+) -> Option<Box<dyn NodeSocket + Send + Sync>> {
+    let (random_node, node_x_location) = create_node(
+        node_tree,
+        "FunctionNodeRandomValue",
+        node_x_location,
+        0,
+        -200
+    )?;
+    let as_func_node = Box::new(
+        random_node.to_bpy_ptr()
+    ) as Box<dyn bpy::types::FunctionNodeRandomValue>;
+    as_func_node.set_data_type(Some("BOOLEAN"));
+
+    random_node.outputs()?.values().into_iter().find(|xs| {
+        let Some(ty) = xs.r#type() else { return false };
+        ty.as_str() == "BOOLEAN"
+    })
+}
+
 fn create_separate_geo_node(
     node_tree: &dyn bpy::types::NodeTree,
     node_x_location: i32,
     node_location_step: i32
 ) -> Option<(Box<dyn bpy::types::Node + Send + Sync>, i32)> {
+    let random_value_node_output_socket = create_random_bool_value_node(node_tree, node_x_location)?;
+    let (separate_geometry_node, node_x_location) = create_node(
+        node_tree,
+        "GeometryNodeSeparateGeometry",
+        node_x_location,
+        node_location_step,
+        0
+    )?;
 
+    let as_geom_sep_node = Box::new(
+        separate_geometry_node.to_bpy_ptr()
+    ) as Box<dyn bpy::types::GeometryNodeSeparateGeometry>;
+    as_geom_sep_node.set_domain(Some("FACE"));
 
-    // todo!()
-    None
+    node_tree.links()?.new(
+        random_value_node_output_socket.to_bpy_ptr(),
+        separate_geometry_node.inputs()?.get("Selection")?.to_bpy_ptr(),
+        None
+    )?;
+
+    Some((separate_geometry_node, node_x_location))
 }
 
 fn create_scale_element_geo_node(
@@ -33,10 +72,45 @@ fn create_scale_element_geo_node(
     node_x_location: i32,
     node_y_location: i32,
 ) -> Option<(Box<dyn bpy::types::Node + Send + Sync>, i32)> {
+    let random_value_node_output_socket = create_random_bool_value_node(node_tree, node_x_location)?;
 
 
-    // todo!()
-    None
+    let (scale_elements_node, node_x_location) = create_node(
+        node_tree,
+        "GeometryNodeScaleElements",
+        node_x_location,
+        200,
+        node_y_location
+    )?;
+
+    let scale = scale_elements_node.inputs()?.get("Scale")?;
+
+    let as_scale = Box::new(
+        scale.to_bpy_ptr()
+    ) as Box<dyn bpy::types::NodeSocketFloat>;
+    as_scale.set_default_value(Some(0.0));
+    as_scale.keyframe_insert("default_value", None, Some(0.0), None, None);
+    as_scale.set_default_value(Some(0.8));
+    as_scale.keyframe_insert("default_value", None, Some(45.0), None, None);
+    as_scale.set_default_value(Some(0.0));
+    as_scale.keyframe_insert("default_value", None, Some(90.0), None, None);
+
+
+    let links = node_tree.links()?;
+
+    links.new(
+        random_value_node_output_socket.to_bpy_ptr(),
+        scale_elements_node.inputs()?.get("Selection")?.to_bpy_ptr(),
+        None
+    );
+
+    links.new(
+        socket.to_bpy_ptr(),
+        scale_elements_node.inputs()?.get("Geometry")?.to_bpy_ptr(),
+        None
+    );
+
+    Some((scale_elements_node, node_x_location))
 }
 
 fn separate_faces_and_animate_scale(
