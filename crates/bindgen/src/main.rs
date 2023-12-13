@@ -1,9 +1,9 @@
-use serde::{ Serialize, Deserialize };
-use std::collections::{HashMap, HashSet};
-use smartstring::alias::String;
-use quote::{quote, format_ident};
-use proc_macro2::TokenStream;
 use heck::{ToSnekCase, ToUpperCamelCase};
+use proc_macro2::{Ident, TokenStream};
+use quote::{format_ident, quote};
+use serde::{Deserialize, Serialize};
+use smartstring::alias::String;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Deserialize, Debug, Serialize)]
 enum BpyType {
@@ -145,7 +145,7 @@ struct BpyPropertyItem {
 struct BpyPropertyArray<T> {
     default: Vec<T>,
     dimensions: [u32; 3],
-    length: u32
+    length: u32,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -153,7 +153,7 @@ struct BpyPropertyNumber<T> {
     hard_min: T,
     hard_max: T,
     soft_min: T,
-    soft_max: T
+    soft_max: T,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -248,7 +248,7 @@ enum BpyProperty {
 }
 
 fn safe_ident(inp: &str) -> proc_macro2::Ident {
-    let as_str =  match inp {
+    let as_str = match inp {
         "fn" => "r#fn",
         "use" => "r#use",
         "move" => "r#move",
@@ -261,7 +261,7 @@ fn safe_ident(inp: &str) -> proc_macro2::Ident {
         "match" => "r#match",
         "box" => "r#box",
         "impl" => "r#impl",
-        xs => xs
+        xs => xs,
     };
     format_ident!("{}", as_str)
 }
@@ -298,36 +298,59 @@ impl BpyProperty {
         let tk = match self {
             BpyProperty::Boolean { item: _ } => quote! { bool },
             BpyProperty::BooleanArray { item: _, array: _ } => quote! { &[bool] },
-            BpyProperty::Int { item: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
-                quote! { u64 }
-            } else {
-                quote! { i64 }
-            },
-            BpyProperty::IntArray { item: _, array: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
-                quote! { Vec<u64> }
-            } else {
-                quote! { Vec<i64> }
-            },
+            BpyProperty::Int { item: _, number } => {
+                if number.hard_min == number.soft_min && number.soft_min == 0 {
+                    quote! { u64 }
+                } else {
+                    quote! { i64 }
+                }
+            }
+            BpyProperty::IntArray {
+                item: _,
+                array: _,
+                number,
+            } => {
+                if number.hard_min == number.soft_min && number.soft_min == 0 {
+                    quote! { Vec<u64> }
+                } else {
+                    quote! { Vec<i64> }
+                }
+            }
             BpyProperty::Float { item: _, number: _ } => quote! { f64 },
-            BpyProperty::FloatArray { item: _, array: _, number: _ } => quote! { &[f64] },
-            BpyProperty::String { item: _, length_max: _, default: _ } => quote! { &str },
+            BpyProperty::FloatArray {
+                item: _,
+                array: _,
+                number: _,
+            } => quote! { &[f64] },
+            BpyProperty::String {
+                item: _,
+                length_max: _,
+                default: _,
+            } => quote! { &str },
             BpyProperty::Enum { item: _, items: _ } => {
                 // for now, enums are strings.
                 quote! { &str }
-            },
+            }
 
-            BpyProperty::Pointer { item: _, fixed_type: _ } => {
+            BpyProperty::Pointer {
+                item: _,
+                fixed_type: _,
+            } => {
                 quote! { BpyPtr }
-            },
-            BpyProperty::Collection { item: _, fixed_type: _, collection: _ } => {
+            }
+            BpyProperty::Collection {
+                item: _,
+                fixed_type: _,
+                collection: _,
+            } => {
                 quote! { BpyPtr }
-            },
+            }
         };
 
         let argname = self.as_item().identifier.as_str().to_snek_case();
         let argname = safe_ident(argname.as_str());
 
-        if self.as_item().is_required {
+        if !self.as_item().is_argument_optional {
             quote! { #argname: #tk }
         } else {
             quote! { #argname: Option<#tk> }
@@ -338,30 +361,53 @@ impl BpyProperty {
         let tk = match self {
             BpyProperty::Boolean { item: _ } => quote! { bool },
             BpyProperty::BooleanArray { item: _, array: _ } => quote! { &[bool] },
-            BpyProperty::Int { item: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
-                quote! { u64 }
-            } else {
-                quote! { i64 }
-            },
-            BpyProperty::IntArray { item: _, array: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
-                quote! { Vec<u64> }
-            } else {
-                quote! { Vec<i64> }
-            },
+            BpyProperty::Int { item: _, number } => {
+                if number.hard_min == number.soft_min && number.soft_min == 0 {
+                    quote! { u64 }
+                } else {
+                    quote! { i64 }
+                }
+            }
+            BpyProperty::IntArray {
+                item: _,
+                array: _,
+                number,
+            } => {
+                if number.hard_min == number.soft_min && number.soft_min == 0 {
+                    quote! { Vec<u64> }
+                } else {
+                    quote! { Vec<i64> }
+                }
+            }
             BpyProperty::Float { item: _, number: _ } => quote! { f64 },
-            BpyProperty::FloatArray { item: _, array: _, number: _ } => quote! { &[f64] },
-            BpyProperty::String { item: _, length_max: _, default: _ } => quote! { &str },
+            BpyProperty::FloatArray {
+                item: _,
+                array: _,
+                number: _,
+            } => quote! { &[f64] },
+            BpyProperty::String {
+                item: _,
+                length_max: _,
+                default: _,
+            } => quote! { &str },
             BpyProperty::Enum { item: _, items: _ } => {
                 // for now, enums are strings.
                 quote! { &str }
-            },
+            }
 
-            BpyProperty::Pointer { item: _, fixed_type: _ } => {
+            BpyProperty::Pointer {
+                item: _,
+                fixed_type: _,
+            } => {
                 quote! { BpyPtr }
-            },
-            BpyProperty::Collection { item: _, fixed_type: _, collection: _ } => {
+            }
+            BpyProperty::Collection {
+                item: _,
+                fixed_type: _,
+                collection: _,
+            } => {
                 quote! { BpyPtr }
-            },
+            }
         };
 
         if self.as_item().is_required {
@@ -371,42 +417,76 @@ impl BpyProperty {
         }
     }
 
-    fn as_return_type(&self, extra_items: &mut Vec<TokenStream>, defined: &mut HashSet<std::string::String>) -> TokenStream {
+    fn as_return_type(
+        &self,
+        extra_items: &mut Vec<TokenStream>,
+        defined: &mut HashSet<std::string::String>,
+    ) -> TokenStream {
         let tk = match self {
             BpyProperty::Boolean { item: _ } => quote! { bool },
             BpyProperty::BooleanArray { item: _, array: _ } => quote! { Vec<bool> },
-            BpyProperty::Int { item: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
-                quote! { u64 }
-            } else {
-                quote! { i64 }
-            },
-            BpyProperty::IntArray { item: _, array: _, number } => if number.hard_min == number.soft_min && number.soft_min == 0 {
-                quote! { Vec<u64> }
-            } else {
-                quote! { Vec<i64> }
-            },
+            BpyProperty::Int { item: _, number } => {
+                if number.hard_min == number.soft_min && number.soft_min == 0 {
+                    quote! { u64 }
+                } else {
+                    quote! { i64 }
+                }
+            }
+            BpyProperty::IntArray {
+                item: _,
+                array: _,
+                number,
+            } => {
+                if number.hard_min == number.soft_min && number.soft_min == 0 {
+                    quote! { Vec<u64> }
+                } else {
+                    quote! { Vec<i64> }
+                }
+            }
             BpyProperty::Float { item: _, number: _ } => quote! { f64 },
-            BpyProperty::FloatArray { item: _, array: _, number: _ } => quote! { Vec<f64> },
-            BpyProperty::String { item: _, length_max: _, default: _ } => quote! { String },
+            BpyProperty::FloatArray {
+                item: _,
+                array: _,
+                number: _,
+            } => quote! { Vec<f64> },
+            BpyProperty::String {
+                item: _,
+                length_max: _,
+                default: _,
+            } => quote! { String },
             BpyProperty::Enum { item: _, items: _ } => {
                 // for now, enums are strings.
                 quote! { String }
-            },
+            }
 
-            BpyProperty::Pointer { item: _, fixed_type } => {
+            BpyProperty::Pointer {
+                item: _,
+                fixed_type,
+            } => {
                 let ident = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
                 quote! { Box<dyn #ident + Send + Sync> }
-            },
-            BpyProperty::Collection { item: _, fixed_type, collection } => {
-                let collection_constraint = collection.as_ref().map(|c| {
-                    let ident = format_ident!("{}", c.as_str().to_upper_camel_case());
-                    quote! { : #ident + BpyPropCollection }
-                }).unwrap_or_else(|| {
-                    quote! { : BpyStruct + BpyPropCollection }
-                });
+            }
+            BpyProperty::Collection {
+                item: _,
+                fixed_type,
+                collection,
+            } => {
+                let collection_constraint = collection
+                    .as_ref()
+                    .map(|c| {
+                        let ident = format_ident!("{}", c.as_str().to_upper_camel_case());
+                        quote! { : #ident + BpyPropCollection }
+                    })
+                    .unwrap_or_else(|| {
+                        quote! { : BpyStruct + BpyPropCollection }
+                    });
 
                 let target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
-                let return_type_str = format!("BpyPropCollection_{}", collection.as_ref().unwrap_or(fixed_type)).to_upper_camel_case();
+                let return_type_str = format!(
+                    "BpyPropCollection_{}",
+                    collection.as_ref().unwrap_or(fixed_type)
+                )
+                .to_upper_camel_case();
                 let return_type_ident = format_ident!("{}", return_type_str);
 
                 // TODO: how to push the target_type back up?
@@ -442,7 +522,7 @@ impl BpyProperty {
                 }
 
                 quote! { Box<dyn #return_type_ident + Send + Sync> }
-            },
+            }
         };
 
         if self.as_item().is_never_none {
@@ -454,17 +534,17 @@ impl BpyProperty {
 
     fn as_parsed_intermediate_value(&self) -> TokenStream {
         match self {
-            BpyProperty::Boolean { .. } |
-            BpyProperty::Int { .. } |
-            BpyProperty::Float { .. } |
-            BpyProperty::String { .. } |
-            BpyProperty::BooleanArray { .. } |
-            BpyProperty::IntArray { .. } |
-            BpyProperty::FloatArray { .. } => {
+            BpyProperty::Boolean { .. }
+            | BpyProperty::Int { .. }
+            | BpyProperty::Float { .. }
+            | BpyProperty::String { .. }
+            | BpyProperty::BooleanArray { .. }
+            | BpyProperty::IntArray { .. }
+            | BpyProperty::FloatArray { .. } => {
                 quote! {
                     serde_json::from_value(bpy_output).expect("expected to deserialize appropriately")
                 }
-            },
+            }
             BpyProperty::Pointer { item, fixed_type } => {
                 let target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
                 if item.is_never_none {
@@ -481,11 +561,19 @@ impl BpyProperty {
                         }
                     }
                 }
-            },
+            }
 
-            BpyProperty::Collection { item, fixed_type, collection } => {
+            BpyProperty::Collection {
+                item,
+                fixed_type,
+                collection,
+            } => {
                 let _target_type = format_ident!("{}", fixed_type.as_str().to_upper_camel_case());
-                let return_type_str = format!("BpyPropCollection_{}", collection.as_ref().unwrap_or(fixed_type)).to_upper_camel_case();
+                let return_type_str = format!(
+                    "BpyPropCollection_{}",
+                    collection.as_ref().unwrap_or(fixed_type)
+                )
+                .to_upper_camel_case();
                 let return_type_ident = format_ident!("{}", return_type_str);
 
                 if item.is_never_none {
@@ -503,11 +591,11 @@ impl BpyProperty {
                         }
                     }
                 }
-            },
+            }
 
             BpyProperty::Enum { item: _, items: _ } => {
                 quote! { serde_json::from_value(bpy_output).expect("expected to deserialize appropriately") }
-            },
+            }
         }
     }
 }
@@ -520,7 +608,7 @@ enum BpyMethod {
         description: String,
         use_self: bool,
         use_self_type: bool,
-        parameters: Vec<BpyProperty>
+        parameters: Vec<BpyProperty>,
     },
 
     #[serde(rename = "builtin_function_or_method")]
@@ -544,28 +632,71 @@ struct BpyStructure {
     methods: HashMap<String, BpyMethod>,
 }
 
-fn method_codegen(methods: &HashMap<String, BpyMethod>, defined: &mut HashSet<std::string::String>) -> (TokenStream, TokenStream, TokenStream) {
-
+fn method_codegen(
+    methods: &HashMap<String, BpyMethod>,
+    defined: &mut HashSet<std::string::String>,
+    _name: &Ident,
+) -> (TokenStream, TokenStream, TokenStream) {
     let mut impl_members: Vec<TokenStream> = Vec::with_capacity(16);
     let mut trait_members: Vec<TokenStream> = Vec::with_capacity(16);
     let mut extra_items: Vec<TokenStream> = Vec::with_capacity(16);
 
     for (func_name, method) in methods {
         match method {
-            BpyMethod::Rna { description, use_self: _, use_self_type: _, parameters } => {
+            BpyMethod::Rna {
+                description,
+                use_self: _,
+                use_self_type: _,
+                parameters,
+            } => {
                 let func_name = func_name.as_str().to_snek_case();
                 let func_name_ident = safe_ident(func_name.as_str());
 
-                let description = description.as_str();
-                let (outputs, inputs): (Vec<_>, Vec<_>) = parameters.iter().partition(|xs| {
-                    xs.is_output()
-                });
+                let (outputs, inputs): (Vec<_>, Vec<_>) =
+                    parameters.iter().partition(|xs| xs.is_output());
 
-                let params: TokenStream = inputs.iter()
+                let (params, kwargs): (Vec<_>, Vec<_>) =
+                    inputs.into_iter().partition(|xs| xs.as_item().is_required);
+
+                let mut params_stream: TokenStream = params
+                    .iter()
                     .map(|prop| prop.as_method_parameter(&mut extra_items))
-                    .fold(TokenStream::new(), |stream, tk| { quote! { #stream, #tk } });
+                    .fold(TokenStream::new(), |stream, tk| {
+                        quote! { #stream, #tk }
+                    });
 
-                let into_pyargs: TokenStream = inputs.iter()
+                let kwargs_bpy = if kwargs.is_empty() {
+                    quote! { None }
+                } else {
+                    quote! { Some(kwargs) }
+                };
+
+                let description = if kwargs.is_empty() {
+                    let kwargs_docs = kwargs
+                        .iter()
+                        .map(|prop| {
+                            let item = prop.as_item();
+                            format!(
+                                "- {}: {}",
+                                item.identifier,
+                                item.description.clone().unwrap_or_default()
+                            )
+                        })
+                        .reduce(|lhs, rhs| format!("{}\n{}", lhs, rhs))
+                        .unwrap_or_default();
+
+                    format!("{}\n{}", description, kwargs_docs)
+                } else {
+                    description.as_str().to_string()
+                };
+
+                if !kwargs.is_empty() {
+                    params_stream.extend(quote! {
+                        , kwargs: Kwargs
+                    });
+                }
+
+                let into_pyargs: TokenStream = params.iter()
                     .map(|prop| {
                         let prop = prop.as_item().identifier.as_str().to_snek_case();
                         safe_ident(prop.as_str())
@@ -573,11 +704,11 @@ fn method_codegen(methods: &HashMap<String, BpyMethod>, defined: &mut HashSet<st
                     .fold(TokenStream::new(), |stream, tk| { quote! { #stream serde_json::to_value(#tk).expect("pyarg must be serializable"), } });
 
                 if outputs.len() > 1 {
-                    continue
+                    continue;
                 }
 
                 let return_type = if outputs.is_empty() {
-                    quote! { }
+                    quote! {}
                 } else {
                     let output = outputs[0].as_return_type(&mut extra_items, defined);
                     quote! {
@@ -586,36 +717,46 @@ fn method_codegen(methods: &HashMap<String, BpyMethod>, defined: &mut HashSet<st
                 };
 
                 let (assign_to, from_serde_value) = if outputs.is_empty() {
-                    (quote! { }, quote! { })
+                    (quote! {}, quote! {})
                 } else {
-                    (quote! { let bpy_output = }, outputs[0].as_parsed_intermediate_value())
+                    (
+                        quote! { let bpy_output = },
+                        outputs[0].as_parsed_intermediate_value(),
+                    )
                 };
 
                 trait_members.push(quote! {
                     #[doc = #description]
-                    fn #func_name_ident(&self #params) #return_type;
+                    fn #func_name_ident(&self #params_stream) #return_type;
                 });
 
                 impl_members.push(quote! {
-                    fn #func_name_ident(&self #params) #return_type {
-                        let bpy_input = PyArgs::argv(self, vec![#into_pyargs]);
+                    fn #func_name_ident(&self #params_stream) #return_type {
+                        let bpy_input = PyArgs::argv(Some(self), vec![#into_pyargs], #kwargs_bpy);
                         #assign_to invoke_bpy_callmethod(#func_name, bpy_input);
                         #from_serde_value
                     }
                 });
-            },
-            BpyMethod::Builtin => {},
-            BpyMethod::MethodDescriptor => {},
-            BpyMethod::PropertyDeferred => {},
-            BpyMethod::Function => {},
-            BpyMethod::Method => {},
+            }
+            BpyMethod::Builtin => {}
+            BpyMethod::MethodDescriptor => {}
+            BpyMethod::PropertyDeferred => {}
+            BpyMethod::Function => {}
+            BpyMethod::Method => {}
         }
     }
 
-    (extra_items.into_iter().collect(), trait_members.into_iter().collect(), impl_members.into_iter().collect())
+    (
+        extra_items.into_iter().collect(),
+        trait_members.into_iter().collect(),
+        impl_members.into_iter().collect(),
+    )
 }
 
-fn property_codegen(properties: &HashMap<String, BpyProperty>, defined: &mut HashSet<std::string::String>) -> (TokenStream, TokenStream, TokenStream) {
+fn property_codegen(
+    properties: &HashMap<String, BpyProperty>,
+    defined: &mut HashSet<std::string::String>,
+) -> (TokenStream, TokenStream, TokenStream) {
     let mut impl_members: Vec<TokenStream> = Vec::with_capacity(16);
     let mut trait_members: Vec<TokenStream> = Vec::with_capacity(16);
     let mut extra_items: Vec<TokenStream> = Vec::with_capacity(16);
@@ -628,7 +769,11 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>, defined: &mut Has
         let setter_param = property.as_setter_parameter_type(&mut extra_items);
         let return_type = property.as_return_type(&mut extra_items, defined);
 
-        let description = property.as_item().description.as_ref().map(|xs| xs.as_str());
+        let description = property
+            .as_item()
+            .description
+            .as_ref()
+            .map(|xs| xs.as_str());
         let description = if let Some(desc) = description {
             quote! { #[doc = #desc] }
         } else {
@@ -660,12 +805,19 @@ fn property_codegen(properties: &HashMap<String, BpyProperty>, defined: &mut Has
         });
     }
 
-    (extra_items.into_iter().collect(), trait_members.into_iter().collect(), impl_members.into_iter().collect())
+    (
+        extra_items.into_iter().collect(),
+        trait_members.into_iter().collect(),
+        impl_members.into_iter().collect(),
+    )
 }
 
-fn structure_to_syntax(structure: BpyStructure, defined: &mut HashSet<std::string::String>) -> TokenStream {
+fn structure_to_syntax(
+    structure: BpyStructure,
+    defined: &mut HashSet<std::string::String>,
+) -> TokenStream {
     if structure.name == "type" {
-        return quote!{}
+        return quote! {};
     }
 
     let is_top = structure.parent == "object" || structure.parent == "type";
@@ -673,8 +825,9 @@ fn structure_to_syntax(structure: BpyStructure, defined: &mut HashSet<std::strin
     let name = format_ident!("{}", structure_name);
     let parent = format_ident!("{}", structure.parent.as_str().to_upper_camel_case());
 
-    let (mut extra_items, mut trait_members, mut impl_members) = property_codegen(&structure.properties, defined);
-    let (e, t, i) = method_codegen(&structure.methods, defined);
+    let (mut extra_items, mut trait_members, mut impl_members) =
+        property_codegen(&structure.properties, defined);
+    let (e, t, i) = method_codegen(&structure.methods, defined, &name);
 
     extra_items.extend(e);
     trait_members.extend(t);
@@ -715,13 +868,13 @@ fn structure_to_syntax(structure: BpyStructure, defined: &mut HashSet<std::strin
 #[derive(Deserialize, Debug, Serialize)]
 struct BpyOperator {
     description: String,
-    parameters: Vec<BpyProperty>
+    parameters: Vec<BpyProperty>,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
 struct Schema {
     classes: Vec<BpyStructure>,
-    operators: HashMap<String, HashMap<String, BpyOperator>>
+    operators: HashMap<String, HashMap<String, BpyOperator>>,
 }
 
 fn ops_codegen(ops: HashMap<String, HashMap<String, BpyOperator>>) -> TokenStream {
@@ -735,14 +888,21 @@ fn ops_codegen(ops: HashMap<String, HashMap<String, BpyOperator>>) -> TokenStrea
         for (op_name, descriptor) in items.into_iter() {
             let op_name_str = op_name.as_str().to_snek_case();
             let op_name_ident = safe_ident(op_name_str.as_str());
-            let inputs: Vec<_> = descriptor.parameters.iter().filter(|xs| {
-                !xs.is_output()
-            }).collect();
+            let inputs: Vec<_> = descriptor
+                .parameters
+                .iter()
+                .filter(|xs| !xs.is_output())
+                .collect();
 
-            let params_docs = inputs.iter()
+            let params_docs = inputs
+                .iter()
                 .map(|prop| {
                     let item = prop.as_item();
-                    format!("- {}: {}", item.identifier, item.description.clone().unwrap_or_default())
+                    format!(
+                        "- {}: {}",
+                        item.identifier,
+                        item.description.clone().unwrap_or_default()
+                    )
                 })
                 .reduce(|lhs, rhs| format!("{}\n{}", lhs, rhs))
                 .unwrap_or_default();
@@ -751,11 +911,11 @@ fn ops_codegen(ops: HashMap<String, HashMap<String, BpyOperator>>) -> TokenStrea
 
             ops.extend(quote! {
                 #[doc = #description]
-                pub fn #op_name_ident (params: impl Into<PyArgs>) -> serde_json::Value {
-                    invoke_bpy_operator(#mod_name_str, #op_name_str, params.into())
+                pub fn #op_name_ident (params: impl Into<Kwargs>) -> serde_json::Value {
+                    let args = PyArgs::argv(None, Vec::new(), Some(params.into()));
+                    invoke_bpy_operator(#mod_name_str, #op_name_str, args)
                 }
             })
-
         }
 
         tkstream.extend(quote! {
@@ -769,16 +929,20 @@ fn ops_codegen(ops: HashMap<String, HashMap<String, BpyOperator>>) -> TokenStrea
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let input = std::env::args().nth(1).unwrap_or_else(|| {
-        "/dev/stdin".to_string()
-    });
+    let input = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/dev/stdin".to_string());
     let file = std::fs::OpenOptions::new()
         .read(true)
         .open(input.as_str())?;
 
     let mut defined = HashSet::new();
     let Schema { classes, operators } = serde_json::from_reader(std::io::BufReader::new(file))?;
-    let results: Vec<_> = classes.into_iter().rev().map(|xs| structure_to_syntax(xs, &mut defined)).collect();
+    let results: Vec<_> = classes
+        .into_iter()
+        .rev()
+        .map(|xs| structure_to_syntax(xs, &mut defined))
+        .collect();
 
     let results: TokenStream = results.into_iter().collect();
 
@@ -821,14 +985,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         ("volumes", "BlendDataVolumes"),
         ("window_managers", "BlendDataWindowManagers"),
         ("workspaces", "BlendDataWorkSpaces"),
-        ("worlds", "BlendDataWorlds")
+        ("worlds", "BlendDataWorlds"),
     ];
 
     let mut bpy_data_items: Vec<_> = Vec::with_capacity(data_targets.len());
     let mut bpy_data_impls: Vec<_> = Vec::with_capacity(data_targets.len());
     for (func, target) in data_targets {
         let func = format_ident!("{}", func);
-        let target = format_ident!("{}", format!("BpyPropCollection_{}", target).to_upper_camel_case());
+        let target = format_ident!(
+            "{}",
+            format!("BpyPropCollection_{}", target).to_upper_camel_case()
+        );
         bpy_data_items.push(quote! {
             #func: i64,
         });
@@ -844,11 +1011,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let bpy_ops: TokenStream = ops_codegen(operators);
 
     let module = quote! {
+        #![allow(unknown_lints)]
+        #![allow(clippy)]
         pub mod bpy {
-            use serde::{ Deserialize, Serialize };
+            use serde::Deserialize;
             use smartstring::alias::String;
-            use crate::{ BpyPtr, PyArgs, invoke_bpy_setattr, invoke_bpy_getattr, invoke_bpy_callmethod, invoke_bpy_operator };
-            use std::collections::HashMap;
+            use crate::{ BpyPtr, PyArgs, Kwargs, invoke_bpy_setattr, invoke_bpy_getattr, invoke_bpy_callmethod, invoke_bpy_operator };
 
             mod private {
                 pub trait Sealed {}
@@ -904,7 +1072,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                 let cfg = extism_pdk::config::get("bpy.data");
                 let data: BpyData = serde_json::from_str(
-                       cfg 
+                       cfg
                             .expect("'bpy.data' extism config must be set")
                             .expect("'bpy.data' should be set")
                             .as_str(),
@@ -917,7 +1085,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             pub mod data {
                 use super::*;
-                use extism_pdk;
 
                 #bpy_data_impls
             }

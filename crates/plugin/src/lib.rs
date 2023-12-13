@@ -1,7 +1,54 @@
 use extism_pdk::*;
 use blender_extism_wasm_pdk::bpy::{self, types::NodeSocket};
 
-fn scene_setup() {
+// A port of https://github.com/CGArtPython/blender_plus_python/blob/main/geo_nodes/subdivided_triangulated_cube/subdivided_triangulated_cube_part_2_done.py
+
+fn scene_setup() -> Option<()> {
+    if bpy::context().active_object().and_then(|obj| obj.mode())? == "EDIT" {
+        bpy::ops::object::editmode_toggle(());
+    }
+
+    for obj in bpy::data::objects().values() {
+        obj.hide_set(false, ().into());
+        obj.set_hide_select(Some(false));
+        obj.set_hide_viewport(Some(false));
+    }
+
+    bpy::ops::object::select_all((
+        ("action", "SELECT"),
+    ));
+    bpy::ops::object::delete(());
+
+    let worlds = bpy::data::worlds();
+    for world in worlds.values() {
+        worlds.remove(world.to_bpy_ptr(), ().into());
+    }
+    bpy::ops::world::new(());
+
+    bpy::context().set_scene(Some(worlds.get("World")?.to_bpy_ptr()));
+    bpy::ops::outliner::orphans_purge((
+        ("do_local_ids", true),
+        ("do_linked_ids", true),
+        ("do_recursive", true),
+    ));
+
+    let scene = bpy::context().scene()?;
+    scene.set_frame_end(Some(30 * 12));
+
+    let world = worlds.get("World")?;
+    if let Some(bg) = world.node_tree().and_then(|xs| xs.nodes()).and_then(|xs| xs.get("Background")) {
+        let socket = bg.inputs()?.get("0")?;
+        let socket = Box::new(
+            socket.to_bpy_ptr()
+        ) as Box<dyn bpy::types::NodeSocketColor>;
+        socket.set_default_value(Some(&[0., 0., 0., 1.]));
+    }
+
+    scene.render().set_fps(Some(30));
+    scene.set_frame_current(Some(1));
+    scene.set_frame_start(Some(1));
+
+    Some(())
 }
 
 fn link_nodes(
@@ -12,7 +59,7 @@ fn link_nodes(
 ) -> Option<()> {
     let from_mesh = from.outputs()?.get(on_name)?;
     let to_mesh = to.inputs()?.get(on_name)?;
-    node_tree.links()?.new(from_mesh.to_bpy_ptr(), to_mesh.to_bpy_ptr(), None);
+    node_tree.links()?.new(from_mesh.to_bpy_ptr(), to_mesh.to_bpy_ptr(), ().into());
     Some(())
 }
 
@@ -60,7 +107,7 @@ fn create_separate_geo_node(
     node_tree.links()?.new(
         random_value_node_output_socket.to_bpy_ptr(),
         separate_geometry_node.inputs()?.get("Selection")?.to_bpy_ptr(),
-        None
+        ().into()
     )?;
 
     Some((separate_geometry_node, node_x_location))
@@ -89,25 +136,30 @@ fn create_scale_element_geo_node(
         scale.to_bpy_ptr()
     ) as Box<dyn bpy::types::NodeSocketFloat>;
     as_scale.set_default_value(Some(0.0));
-    as_scale.keyframe_insert("default_value", None, Some(0.0), None, None);
+    as_scale.keyframe_insert("default_value", (
+        ("frame", 0.0),
+    ).into());
     as_scale.set_default_value(Some(0.8));
-    as_scale.keyframe_insert("default_value", None, Some(45.0), None, None);
+    as_scale.keyframe_insert("default_value", (
+        ("frame", 45.0),
+    ).into());
     as_scale.set_default_value(Some(0.0));
-    as_scale.keyframe_insert("default_value", None, Some(90.0), None, None);
-
+    as_scale.keyframe_insert("default_value", (
+        ("frame", 90.0),
+    ).into());
 
     let links = node_tree.links()?;
 
     links.new(
         random_value_node_output_socket.to_bpy_ptr(),
         scale_elements_node.inputs()?.get("Selection")?.to_bpy_ptr(),
-        None
+        ().into()
     );
 
     links.new(
         socket.to_bpy_ptr(),
         scale_elements_node.inputs()?.get("Geometry")?.to_bpy_ptr(),
-        None
+        ().into()
     );
 
     Some((scale_elements_node, node_x_location))
@@ -161,13 +213,13 @@ fn separate_faces_and_animate_scale(
     links.new(
         top_scale_elements_node.outputs()?.get("Geometry")?.to_bpy_ptr(),
         join_geometry_node.inputs()?.get("Geometry")?.to_bpy_ptr(),
-        None
+        ().into()
     );
 
     links.new(
         bottom_scale_elements_node.outputs()?.get("Geometry")?.to_bpy_ptr(),
         join_geometry_node.inputs()?.get("Geometry")?.to_bpy_ptr(),
-        None
+        ().into()
     );
 
     Some((separate_geometry_node, join_geometry_node, node_x_location))
@@ -246,13 +298,13 @@ fn update_geo_node_tree(node_tree: &dyn bpy::types::NodeTree) -> Option<()> {
     links.new(
         split_edges_node.outputs()?.get("Mesh")?.to_bpy_ptr(),
         separate_geometry_node.inputs()?.get("Geometry")?.to_bpy_ptr(),
-        None
+        ().into()
     );
 
     links.new(
         join_geometry_node.outputs()?.get("Geometry")?.to_bpy_ptr(),
         out_node.inputs()?.get("Geometry")?.to_bpy_ptr(),
-        None
+        ().into()
     );
     Some(())
 }
@@ -281,8 +333,8 @@ fn example_main() {
     ));
 }
 
-#[plugin_fn]
-pub fn example() -> FnResult<()> {
+#[allow(dead_code)]
+fn old_example() -> FnResult<()> {
     let Some(cube) = bpy::data::objects().get("Cube") else {
         return Ok(())
     };
@@ -295,7 +347,11 @@ pub fn example() -> FnResult<()> {
 
     eprintln!("hello world! {:?}", bpy::data::objects().items());
     eprintln!("but wait! {:?}", bpy::context().active_object());
+    Ok(())
+}
 
+#[plugin_fn]
+pub fn example() -> FnResult<()> {
     example_main();
     Ok(())
 }

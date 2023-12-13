@@ -23,12 +23,17 @@ impl std::fmt::Debug for BpyPtr {
     }
 }
 
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(transparent)]
+pub struct Kwargs(HashMap<String, serde_json::Value>);
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct PyArgs {
     #[serde(rename = "self")]
     target: Option<BpyPtr>,
     args: Option<Vec<serde_json::Value>>,
-    kwargs: Option<HashMap<String, serde_json::Value>>,
+    kwargs: Option<Kwargs>,
 }
 
 impl PyArgs {
@@ -48,11 +53,11 @@ impl PyArgs {
         }
     }
 
-    fn argv(target: &BpyPtr, args: Vec<serde_json::Value>) -> Self {
+    fn argv(target: Option<&BpyPtr>, args: Vec<serde_json::Value>, kwargs: Option<Kwargs>) -> Self {
         Self {
-            target: Some(target.clone()),
+            target: target.cloned(),
             args: Some(args),
-            ..Default::default()
+            kwargs
         }
     }
 }
@@ -81,7 +86,7 @@ macro_rules! all_the_tuples {
 macro_rules! impl_from_for_pyargs {
     ( $($ty:ident),* $(,)? ) => {
         #[allow(non_snake_case)]
-        impl<$($ty,)*> From<($((&str, $ty),)*)> for PyArgs
+        impl<$($ty,)*> From<($((&str, $ty),)*)> for Kwargs
         where
             $( $ty: Serialize, )*
         {
@@ -91,12 +96,7 @@ macro_rules! impl_from_for_pyargs {
                 $(
                     hm.insert(String::from_str($ty.0).unwrap(), serde_json::to_value($ty.1).unwrap());
                 )*
-
-                PyArgs {
-                    target: None,
-                    args: None,
-                    kwargs: Some(hm)
-                }
+                Self(hm)
             }
         }
     }
@@ -104,22 +104,18 @@ macro_rules! impl_from_for_pyargs {
 
 all_the_tuples!(impl_from_for_pyargs);
 
-impl From<()> for PyArgs {
-    fn from(value: ()) -> Self {
+impl From<()> for Kwargs {
+    fn from(_value: ()) -> Self {
         Default::default()
     }
 }
 
-impl<S: Into<String>, T: Serialize> From<HashMap<S, T>> for PyArgs {
+impl<S: Into<String>, T: Serialize> From<HashMap<S, T>> for Kwargs {
     fn from(value: HashMap<S, T>) -> Self {
-        let hm = value.into_iter().map(|(k, v)| {
+        let hm: HashMap<_, _> = value.into_iter().map(|(k, v)| {
             (k.into(), serde_json::to_value(v).unwrap())
         }).collect();
-        PyArgs {
-            target: None,
-            args: None,
-            kwargs: Some(hm)
-        }
+        Kwargs(hm)
     }
 }
 
