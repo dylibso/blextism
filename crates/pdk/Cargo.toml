@@ -1,5 +1,5 @@
 [package]
-name = "blender-extism-wasm-pdk"
+name = "blextism"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

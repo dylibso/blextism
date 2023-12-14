@@ -8,7 +8,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-blender-extism-wasm-pdk = { workspace = true }
+blextism = { workspace = true }
 extism-pdk = { workspace = true }
 
 [lib]

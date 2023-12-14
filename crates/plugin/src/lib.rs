@@ -1,5 +1,5 @@
 use extism_pdk::*;
-use blender_extism_wasm_pdk::bpy::{self, types::NodeSocket};
+use blextism::bpy::{self, types::NodeSocket};
 
 // A port of https://github.com/CGArtPython/blender_plus_python/blob/main/geo_nodes/subdivided_triangulated_cube/subdivided_triangulated_cube_part_2_done.py
 
@@ -25,28 +25,63 @@ fn scene_setup() -> Option<()> {
     }
     bpy::ops::world::new(());
 
-    bpy::context().set_scene(Some(worlds.get("World")?.to_bpy_ptr()));
+    let scene = bpy::context().scene()?;
+    scene.set_world(Some(worlds.get("World")?.to_bpy_ptr()));
+    let render = scene.render();
+    render.set_engine(Some("CYCLES"));
+    render.image_settings().set_file_format(Some("FFMPEG"));
+    render.ffmpeg()?.set_codec(Some("H264"));
+    render.set_filepath(Some("output"));
+    render.set_fps(Some(30));
+    render.set_resolution_x(Some(1280));
+    render.set_resolution_y(Some(720));
+
     bpy::ops::outliner::orphans_purge((
         ("do_local_ids", true),
         ("do_linked_ids", true),
         ("do_recursive", true),
     ));
 
-    let scene = bpy::context().scene()?;
     scene.set_frame_end(Some(30 * 12));
 
     let world = worlds.get("World")?;
     if let Some(bg) = world.node_tree().and_then(|xs| xs.nodes()).and_then(|xs| xs.get("Background")) {
-        let socket = bg.inputs()?.get("0")?;
+        let socket = bg.inputs()?.get("Color")?;
         let socket = Box::new(
             socket.to_bpy_ptr()
         ) as Box<dyn bpy::types::NodeSocketColor>;
         socket.set_default_value(Some(&[0., 0., 0., 1.]));
     }
 
-    scene.render().set_fps(Some(30));
     scene.set_frame_current(Some(1));
     scene.set_frame_start(Some(1));
+
+    let light_data = bpy::data::lights().new("light", "POINT")?;
+    let as_point_light_data = Box::new(
+        light_data.to_bpy_ptr()
+    ) as Box<dyn bpy::types::PointLight>;
+    as_point_light_data.set_energy(Some(100.0));
+
+    let light_object = bpy::data::objects().new("light", as_point_light_data.to_bpy_ptr())?;
+
+    bpy::context().collection()?.objects()?.link(light_object.to_bpy_ptr());
+    light_object.set_location(Some(&[2.0, 2.0, 1.333]));
+    bpy::context().view_layer()?.objects()?.set_active(Some(light_object.to_bpy_ptr()));
+
+    let camera_data = bpy::data::cameras().new("Camera")?;
+    let camera_object = bpy::data::objects().new("Camera", camera_data.to_bpy_ptr())?;
+
+
+    camera_object.set_location(Some(&[4.93136, -2.46555, 4.62837]));
+    camera_object.set_rotation_euler(Some(&[0.9223401872, 0., 1.10716881]));
+
+    scene.set_camera(Some(camera_object.to_bpy_ptr()));
+
+    bpy::context().collection()?.objects()?.link(camera_object.to_bpy_ptr());
+    let dg = bpy::context().evaluated_depsgraph_get()?;
+    dg.update();
+
+
 
     Some(())
 }
@@ -67,7 +102,7 @@ fn create_random_bool_value_node(
     node_tree: &dyn bpy::types::NodeTree,
     node_x_location: i32,
 ) -> Option<Box<dyn NodeSocket + Send + Sync>> {
-    let (random_node, node_x_location) = create_node(
+    let (random_node, _) = create_node(
         node_tree,
         "FunctionNodeRandomValue",
         node_x_location,
@@ -311,6 +346,10 @@ fn update_geo_node_tree(node_tree: &dyn bpy::types::NodeTree) -> Option<()> {
 
 fn create_centerpiece() -> Option<()> {
     bpy::ops::mesh::primitive_plane_add(());
+    bpy::context().active_object()?.set_scale(Some(&[10., 10., 1.]));
+
+    bpy::ops::mesh::primitive_plane_add(());
+    bpy::context().active_object()?.set_location(Some(&[0., 0., 1.5]));
 
     bpy::ops::node::new_geometry_nodes_modifier(());
     let node_tree = bpy::data::node_groups().get("Geometry Nodes")?;
@@ -331,23 +370,6 @@ fn example_main() {
     bpy::ops::wm::save_as_mainfile((
         ("filepath", "foo.blend"),
     ));
-}
-
-#[allow(dead_code)]
-fn old_example() -> FnResult<()> {
-    let Some(cube) = bpy::data::objects().get("Cube") else {
-        return Ok(())
-    };
-
-    if let Some(mut scale) = cube.scale() {
-        extism_pdk::info!("scale={:?}", scale);
-        scale[0] = 6.0;
-        cube.set_scale(Some(scale.as_slice()));
-    }
-
-    eprintln!("hello world! {:?}", bpy::data::objects().items());
-    eprintln!("but wait! {:?}", bpy::context().active_object());
-    Ok(())
 }
 
 #[plugin_fn]

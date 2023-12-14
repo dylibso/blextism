@@ -1,5 +1,5 @@
 [package]
-name = "blender-extism-wasm-bindgen"
+name = "blextism-bindgen"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

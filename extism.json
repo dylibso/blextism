@@ -1,5 +1,6 @@
 {
   "wasm": [{
     "path": "./target/wasm32-wasi/release/plugin.wasm"
-  }]
+  }],
+  "timeout_ms": null
 }

@@ -3,7 +3,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use serde::{Deserialize, Serialize};
 use smartstring::alias::String;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Deserialize, Debug, Serialize)]
 enum BpyType {
@@ -628,12 +628,12 @@ enum BpyMethod {
 struct BpyStructure {
     name: String,
     parent: String,
-    properties: HashMap<String, BpyProperty>,
-    methods: HashMap<String, BpyMethod>,
+    properties: BTreeMap<String, BpyProperty>,
+    methods: BTreeMap<String, BpyMethod>,
 }
 
 fn method_codegen(
-    methods: &HashMap<String, BpyMethod>,
+    methods: &BTreeMap<String, BpyMethod>,
     defined: &mut HashSet<std::string::String>,
     _name: &Ident,
 ) -> (TokenStream, TokenStream, TokenStream) {
@@ -671,7 +671,7 @@ fn method_codegen(
                     quote! { Some(kwargs) }
                 };
 
-                let description = if kwargs.is_empty() {
+                let description = if !kwargs.is_empty() {
                     let kwargs_docs = kwargs
                         .iter()
                         .map(|prop| {
@@ -754,7 +754,7 @@ fn method_codegen(
 }
 
 fn property_codegen(
-    properties: &HashMap<String, BpyProperty>,
+    properties: &BTreeMap<String, BpyProperty>,
     defined: &mut HashSet<std::string::String>,
 ) -> (TokenStream, TokenStream, TokenStream) {
     let mut impl_members: Vec<TokenStream> = Vec::with_capacity(16);
@@ -874,10 +874,10 @@ struct BpyOperator {
 #[derive(Deserialize, Debug, Serialize)]
 struct Schema {
     classes: Vec<BpyStructure>,
-    operators: HashMap<String, HashMap<String, BpyOperator>>,
+    operators: BTreeMap<String, BTreeMap<String, BpyOperator>>,
 }
 
-fn ops_codegen(ops: HashMap<String, HashMap<String, BpyOperator>>) -> TokenStream {
+fn ops_codegen(ops: BTreeMap<String, BTreeMap<String, BpyOperator>>) -> TokenStream {
     let mut tkstream = TokenStream::new();
     let _extra_items: Vec<TokenStream> = Vec::with_capacity(16);
     for (mod_name, items) in ops.into_iter() {
