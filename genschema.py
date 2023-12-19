@@ -183,6 +183,7 @@ def disambiguate_render_property(output):
 
 
 def add_context_properties(output):
+    # extracted from https://github.com/blender/blender/blob/9c0bffcc89f174f160805de042b00ae7c201c40b/doc/python_api/sphinx_doc_gen.py#L1161
     # Bone: props commented out until we get Bone types included
     # in schema generation (they have multiple bases so they're omitted right now)
     items = {

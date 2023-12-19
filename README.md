@@ -1,5 +1,15 @@
 # Blextism - Blender + Extism
 
+<div>
+    <a href="https://www.loom.com/share/0d73ec07c47644cd8f106260a3d3f61a">
+      <p>Blender + Extism = Blextism?! Much to think about - Watch Video</p>
+    </a>
+    <a href="https://www.loom.com/share/0d73ec07c47644cd8f106260a3d3f61a">
+      <img style="max-width:640px;" src="https://cdn.loom.com/sessions/thumbnails/0d73ec07c47644cd8f106260a3d3f61a-1703011475711-with-play.gif">
+    </a>
+</div>
+
+
 This repository provides **three** :crab: Rust crates and **two** :snake: Python modules:
 
 1. :snake: A `genschema.py` module that uses Blender's RNA system to perform reflection, generating a schema file.
